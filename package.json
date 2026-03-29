@@ -8,7 +8,7 @@
     "predev": "node -e \"import('node:fs').then((fs) => fs.rmSync('.next', { recursive: true, force: true }))\"",
     "dev": "npm run prisma:generate && npm run prisma:push && concurrently \"npm run dev:server\" \"next dev --webpack\"",
     "dev:server": "tsx watch src/server/index.ts",
-    "build": "next build --webpack",
+    "build": "prisma generate && next build --webpack",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "check:resources": "tsx src/server/scripts/validateResources.ts",
