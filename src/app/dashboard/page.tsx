@@ -8,6 +8,7 @@ import {
 } from "@/app/actions";
 import { getTreasuryState, getWorkspaceStateOrNull } from "@/app/lib/server-data";
 import { LiveAssetsPanel } from "@/components/dashboard/LiveAssetsPanel";
+import { ErrorBanner } from "@/components/dashboard/ErrorBanner";
 import { ForexRatesWidget } from "@/components/dashboard/ForexRatesWidget";
 import {
   DashboardEmptyState,
@@ -29,8 +30,16 @@ function formatFullAmount(value: string) {
   return fractionalPart ? `${formattedWhole}.${fractionalPart}` : formattedWhole;
 }
 
-export default async function DashboardOverview() {
-  const [workspace, treasury] = await Promise.all([getWorkspaceStateOrNull(), getTreasuryState()]);
+export default async function DashboardOverview({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string; bootstrapped?: string }>;
+}) {
+  const [workspace, treasury, params] = await Promise.all([
+    getWorkspaceStateOrNull(),
+    getTreasuryState(),
+    searchParams,
+  ]);
 
   if (!workspace) {
     return (
@@ -52,6 +61,7 @@ export default async function DashboardOverview() {
     ? workspace.assets.find((a) => a.mintAddress === stableAsset.mintAddress)
     : null;
   const walletIsEmpty = workspace.assets.length === 0 || workspace.assets.every((a) => Number(a.amountDisplay) === 0);
+  const walletHasTokens = workspace.assets.some((asset) => Number(asset.amountDisplay) > 0);
   const authSessionLabel = workspace.authSession
     ? workspace.authSession.source === "local"
       ? "Local device session"
@@ -63,6 +73,13 @@ export default async function DashboardOverview() {
 
   return (
     <div className="space-y-8">
+      {params.error ? <ErrorBanner message={params.error} /> : null}
+      {params.bootstrapped ? (
+        <ErrorBanner
+          tone="success"
+          message={`Treasury vault initialized successfully. ${stableAsset ? `${stableAsset.symbol} settlement rails are now configured.` : "Refresh the page if the treasury asset details are still loading."}`}
+        />
+      ) : null}
       <OnboardingWelcome
         displayName={workspace.profile.displayName}
         isBootstrapped={!!stableAsset}
@@ -130,27 +147,30 @@ export default async function DashboardOverview() {
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">Treasury runtime</p>
               <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
-                {stableAsset ? "Bootstrapped and settlement-ready" : "Bootstrap required"}
+                {stableAsset ? "Treasury vault is settlement-ready" : "Treasury vault initialization required"}
               </h2>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-400">
-                Review the managed treasury identity, stable asset posture, payout queue, and funding guidance before moving capital or issuing links.
+                {walletHasTokens
+                  ? "Your connected wallet already holds assets. This step only initializes the server-side treasury vault used for payout claims, audit state, and treasury-backed settlement."
+                  : "Review the treasury vault identity, stable asset posture, payout queue, and funding guidance before moving capital or issuing links."}
               </p>
             </div>
             {!stableAsset && (
               <form action={bootstrapTreasuryFormAction}>
-                <button className={dashboardButtonClassName}>Bootstrap treasury</button>
+                <input type="hidden" name="returnTo" value="/dashboard" />
+                <button className={dashboardButtonClassName}>Initialize treasury vault</button>
               </form>
             )}
           </div>
 
           <div className="mt-8 grid gap-4 md:grid-cols-2">
             <div className={cn(dashboardSubPanelClassName, "p-5")}>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Treasury vault</p>
-              <p className="mt-4 break-all font-mono text-sm text-zinc-100">{treasury.actors.treasuryAddress || "Not bootstrapped"}</p>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Passkey vault</p>
+              <p className="mt-4 break-all font-mono text-sm text-zinc-100">{workspace.profile.walletAddress}</p>
               <p className="mt-3 text-sm leading-6 text-zinc-400">
                 Explorer:{" "}
-                {treasury.summary.explorerAddressUrl ? (
-                  <a href={treasury.summary.explorerAddressUrl} className="text-emerald-400 hover:underline" target="_blank" rel="noreferrer">
+                {workspace.profile.walletAddress ? (
+                  <a href={`https://explorer.solana.com/address/${workspace.profile.walletAddress}?cluster=devnet`} className="text-emerald-400 hover:underline" target="_blank" rel="noreferrer">
                     open address
                   </a>
                 ) : (
@@ -194,8 +214,8 @@ export default async function DashboardOverview() {
             </div>
             <p className="mt-4 text-sm leading-7 text-zinc-400">
               {stableAsset
-                ? `Managed treasury asset ${stableAsset.symbol} is live at mint ${stableAsset.mintAddress} on Solana devnet.`
-                : "Bootstrap creates the treasury identities, policy controls, and managed stable asset on Solana devnet."}
+                ? `Treasury settlement asset ${stableAsset.symbol} is live at mint ${stableAsset.mintAddress} on Solana devnet.`
+                : "Initializing the treasury vault creates the treasury identities, policy controls, and settlement asset used for payout claims on Solana devnet."}
             </p>
           </div>
         </DashboardPanel>

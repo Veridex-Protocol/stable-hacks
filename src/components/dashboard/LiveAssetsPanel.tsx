@@ -32,13 +32,20 @@ export function LiveAssetsPanel({
   const [syncedAt, setSyncedAt] = useState<number | null>(initialAssets[0]?.capturedAt ?? null);
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "error">("idle");
   const failCountRef = React.useRef(0);
-  const BASE_INTERVAL = 12_000;
-  const MAX_INTERVAL = 120_000;
+  const refreshInFlightRef = React.useRef(false);
+  const BASE_INTERVAL = 30_000;
+  const MAX_INTERVAL = 300_000;
 
   const refreshAssets = useEffectEvent(async () => {
     if (document.visibilityState === "hidden") {
       return;
     }
+
+    if (refreshInFlightRef.current) {
+      return;
+    }
+
+    refreshInFlightRef.current = true;
 
     setSyncState("syncing");
 
@@ -64,6 +71,8 @@ export function LiveAssetsPanel({
     } catch {
       failCountRef.current = Math.min(failCountRef.current + 1, 6);
       setSyncState("error");
+    } finally {
+      refreshInFlightRef.current = false;
     }
   });
 
@@ -93,7 +102,7 @@ export function LiveAssetsPanel({
       clearTimeout(timerId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [refreshAssets]);
+  }, []);
 
   return (
     <div>
@@ -102,7 +111,7 @@ export function LiveAssetsPanel({
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">Assets and activity</p>
           <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">Live balances and recent settlement proof</h2>
           <p className="mt-3 text-sm leading-7 text-zinc-400">
-            Asset balances are refreshed directly from Solana devnet every few seconds so new wallet funding shows up without a full page reload.
+            Asset balances are refreshed directly from Solana devnet every 30 seconds so new wallet funding shows up without a full page reload.
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">

@@ -48,6 +48,7 @@ export default async function CollectionsPage({
 
   const stableAsset = treasury.summary.stableAsset;
   const treasuryReady = Boolean(treasury.policy && stableAsset && treasury.actors.treasuryAddress);
+  const walletHasTokens = workspace.assets.some((asset) => Number(asset.amountDisplay) > 0);
 
   return (
     <div className="space-y-8">
@@ -61,17 +62,19 @@ export default async function CollectionsPage({
       <DashboardPanel className="p-7 sm:p-8">
         <DashboardPageHeader
           eyebrow="Collections readiness"
-          title={treasuryReady ? "Treasury is ready for payment and claim links" : "Treasury bootstrap will run on first commerce action"}
+          title={treasuryReady ? "Treasury vault is ready for payment and claim links" : "Treasury vault initialization will run on first commerce action"}
           description={
             treasuryReady
               ? `Claims, payment links, and invoices will settle against ${stableAsset!.symbol} on Solana devnet from treasury vault ${workspace.treasury.vaultAddress}.`
-              : "The first payment link, payout claim, or invoice you create will initialize the Solana treasury vault and managed stable asset automatically. You can also bootstrap it manually first."
+              : walletHasTokens
+                ? "Your connected wallet already has assets. The first payment link, payout claim, or invoice will only initialize the dedicated treasury vault used for claim settlement and audit state."
+                : "The first payment link, payout claim, or invoice you create will initialize the Solana treasury vault and settlement asset automatically. You can also initialize it manually first."
           }
           actions={
             !treasuryReady ? (
               <form action={bootstrapTreasuryFormAction}>
                 <input type="hidden" name="returnTo" value="/dashboard/collections" />
-                <button className={dashboardButtonClassName}>Bootstrap treasury now</button>
+                <button className={dashboardButtonClassName}>Initialize treasury vault</button>
               </form>
             ) : undefined
           }
@@ -86,7 +89,7 @@ export default async function CollectionsPage({
               </DashboardStatusBadge>
             </div>
             <p className="mt-4 break-all text-sm leading-6 text-zinc-400">
-              {treasuryReady ? stableAsset!.mintAddress : "A managed Solana devnet stable asset will be created on first commerce action."}
+              {treasuryReady ? stableAsset!.mintAddress : "A treasury settlement asset will be attached on first commerce action."}
             </p>
           </div>
 
@@ -111,7 +114,9 @@ export default async function CollectionsPage({
             <p className="mt-4 text-sm leading-7 text-zinc-400">
               {treasuryReady
                 ? "Commerce flows are already live. New payment links, payout claims, and invoices will use the bootstrapped treasury immediately."
-                : "Creating your first commerce object will bootstrap the treasury, mint the managed stable asset, and then continue the request."}
+                : walletHasTokens
+                  ? "Creating your first commerce object will initialize the treasury vault only. It will not add more tokens to your connected wallet."
+                  : "Creating your first commerce object will initialize the treasury vault and settlement asset, then continue the request."}
             </p>
           </div>
         </div>
@@ -130,7 +135,14 @@ export default async function CollectionsPage({
             <p className="mt-2 text-sm leading-6 text-zinc-400">Human-friendly collection page with optional x402 endpoint for agentic payment flows.</p>
             <div className="mt-5 space-y-4">
               <input name="title" required className={dashboardInputClassName} placeholder="Quarterly treasury retainer" />
-              <input name="amount" required type="number" min="0.01" step="0.01" className={dashboardInputClassName} placeholder="1000.00" />
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <input name="amount" required type="number" min="0.01" step="0.01" className={dashboardInputClassName} placeholder="1000.00" />
+                <select name="currency" defaultValue="USDC" className={dashboardSelectClassName}>
+                  <option value="USDC">USDC</option>
+                  <option value="EURC">EURC</option>
+                  <option value="SOL">SOL</option>
+                </select>
+              </div>
               <input name="customerName" className={dashboardInputClassName} placeholder="Customer name" />
               <input name="customerEmail" type="email" className={dashboardInputClassName} placeholder="customer@email.com" />
               <textarea name="description" className={dashboardTextareaClassName} placeholder="What this payment covers" />
@@ -149,11 +161,18 @@ export default async function CollectionsPage({
             <h2 className="text-lg font-semibold text-white">Payout claim link</h2>
             <p className="mt-2 text-sm leading-6 text-zinc-400">
               Issue a claimable payout that can be settled by a human or an agent, based on the selected mode.
-              {!treasuryReady ? " If this is your first claim link, the treasury will bootstrap automatically before the link is created." : ""}
+              {!treasuryReady ? " If this is your first claim link, the treasury vault will initialize automatically before the link is created." : ""}
             </p>
             <div className="mt-5 space-y-4">
               <input name="title" required className={dashboardInputClassName} placeholder="Vendor reimbursement" />
-              <input name="amount" required type="number" min="0.01" step="0.01" className={dashboardInputClassName} placeholder="250.00" />
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <input name="amount" required type="number" min="0.01" step="0.01" className={dashboardInputClassName} placeholder="250.00" />
+                <select name="currency" defaultValue="USDC" className={dashboardSelectClassName}>
+                  <option value="USDC">USDC</option>
+                  <option value="EURC">EURC</option>
+                  <option value="SOL">SOL</option>
+                </select>
+              </div>
               <input name="customerName" className={dashboardInputClassName} placeholder="Recipient name" />
               <input name="customerEmail" type="email" className={dashboardInputClassName} placeholder="recipient@email.com" />
               <textarea name="description" className={dashboardTextareaClassName} placeholder="Why this payout is claimable" />
@@ -173,7 +192,14 @@ export default async function CollectionsPage({
               <input name="title" required className={dashboardInputClassName} placeholder="Implementation invoice" />
               <input name="customerName" required className={dashboardInputClassName} placeholder="Customer name" />
               <input name="customerEmail" type="email" className={dashboardInputClassName} placeholder="customer@email.com" />
-              <input name="amount" required type="number" min="0.01" step="0.01" className={dashboardInputClassName} placeholder="5000.00" />
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <input name="amount" required type="number" min="0.01" step="0.01" className={dashboardInputClassName} placeholder="5000.00" />
+                <select name="currency" defaultValue="USDC" className={dashboardSelectClassName}>
+                  <option value="USDC">USDC</option>
+                  <option value="EURC">EURC</option>
+                  <option value="SOL">SOL</option>
+                </select>
+              </div>
               <textarea name="description" className={dashboardTextareaClassName} placeholder="Invoice notes" />
             </div>
             <button className={cn(dashboardButtonClassName, "mt-6 w-full")}>Create invoice</button>

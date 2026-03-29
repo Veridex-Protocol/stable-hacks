@@ -45,6 +45,7 @@ interface CacheEntry<T> {
 
 const CACHE_TTL_INTRADAY = 60_000;
 const CACHE_TTL_REFERENCE = 300_000;
+type SixListingRecord = Record<string, unknown>;
 
 export class SixMarketDataService {
   private readonly baseUrl: string;
@@ -250,11 +251,11 @@ export class SixMarketDataService {
     return {
       pair,
       valorBc,
-      bid: this.safeNumber(listing, 'bidPrice'),
-      ask: this.safeNumber(listing, 'askPrice'),
-      last: this.safeNumber(listing, 'lastTradedPrice') ?? this.safeNumber(listing, 'closingPrice'),
-      high: this.safeNumber(listing, 'highPrice'),
-      low: this.safeNumber(listing, 'lowPrice'),
+      bid: this.snapshotNumber(listing, 'bestBid', 'bidPrice'),
+      ask: this.snapshotNumber(listing, 'bestAsk', 'askPrice'),
+      last: this.snapshotNumber(listing, 'last', 'lastTradedPrice') ?? this.snapshotNumber(listing, 'settlementPrice', 'closingPrice'),
+      high: this.snapshotNumber(listing, 'high', 'highPrice'),
+      low: this.snapshotNumber(listing, 'low', 'lowPrice'),
       timestamp: Date.now(),
     };
   }
@@ -263,16 +264,16 @@ export class SixMarketDataService {
     const listings = this.extractListings(raw);
     const pairsByVb = Object.fromEntries(Object.entries(SIX_FOREX_IDENTIFIERS).map(([k, v]) => [v, k]));
 
-    return listings.map((listing: Record<string, unknown>) => {
-      const vb = String(listing.valorBc ?? listing.valor_bc ?? '');
+    return listings.map((listing) => {
+      const vb = this.getListingValorBc(listing);
       return {
         pair: pairsByVb[vb] ?? vb,
         valorBc: vb,
-        bid: this.safeNumber(listing, 'bidPrice'),
-        ask: this.safeNumber(listing, 'askPrice'),
-        last: this.safeNumber(listing, 'lastTradedPrice') ?? this.safeNumber(listing, 'closingPrice'),
-        high: this.safeNumber(listing, 'highPrice'),
-        low: this.safeNumber(listing, 'lowPrice'),
+        bid: this.snapshotNumber(listing, 'bestBid', 'bidPrice'),
+        ask: this.snapshotNumber(listing, 'bestAsk', 'askPrice'),
+        last: this.snapshotNumber(listing, 'last', 'lastTradedPrice') ?? this.snapshotNumber(listing, 'settlementPrice', 'closingPrice'),
+        high: this.snapshotNumber(listing, 'high', 'highPrice'),
+        low: this.snapshotNumber(listing, 'low', 'lowPrice'),
         timestamp: Date.now(),
       };
     });
@@ -282,15 +283,15 @@ export class SixMarketDataService {
     const listing = this.extractFirstListing(raw);
     return {
       valorBc,
-      name: listing.shortName as string ?? listing.instrumentName as string ?? null,
-      last: this.safeNumber(listing, 'lastTradedPrice') ?? this.safeNumber(listing, 'closingPrice'),
-      bid: this.safeNumber(listing, 'bidPrice'),
-      ask: this.safeNumber(listing, 'askPrice'),
-      open: this.safeNumber(listing, 'openingPrice'),
-      high: this.safeNumber(listing, 'highPrice'),
-      low: this.safeNumber(listing, 'lowPrice'),
-      volume: this.safeNumber(listing, 'accumulatedVolume'),
-      currency: listing.currency as string ?? null,
+      name: this.getListingName(listing),
+      last: this.snapshotNumber(listing, 'last', 'lastTradedPrice') ?? this.snapshotNumber(listing, 'settlementPrice', 'closingPrice'),
+      bid: this.snapshotNumber(listing, 'bestBid', 'bidPrice'),
+      ask: this.snapshotNumber(listing, 'bestAsk', 'askPrice'),
+      open: this.snapshotNumber(listing, 'open', 'openingPrice'),
+      high: this.snapshotNumber(listing, 'high', 'highPrice'),
+      low: this.snapshotNumber(listing, 'low', 'lowPrice'),
+      volume: this.snapshotNumber(listing, 'accumulatedVolume'),
+      currency: this.getListingCurrency(listing),
       timestamp: Date.now(),
     };
   }
@@ -310,18 +311,66 @@ export class SixMarketDataService {
     }));
   }
 
-  private extractListings(raw: Record<string, unknown>): Record<string, unknown>[] {
+  private extractListings(raw: Record<string, unknown>): SixListingRecord[] {
     const data = raw.data as Record<string, unknown> | undefined;
-    if (data && Array.isArray(data.listings)) return data.listings;
-    if (Array.isArray(raw.listings)) return raw.listings as Record<string, unknown>[];
-    if (Array.isArray(data)) return data as unknown as Record<string, unknown>[];
-    if (Array.isArray(raw)) return raw as unknown as Record<string, unknown>[];
+    if (data && Array.isArray(data.listings)) return data.listings as SixListingRecord[];
+    if (Array.isArray(raw.listings)) return raw.listings as SixListingRecord[];
+    if (Array.isArray(data)) return data as unknown as SixListingRecord[];
+    if (Array.isArray(raw)) return raw as unknown as SixListingRecord[];
     return [];
   }
 
-  private extractFirstListing(raw: Record<string, unknown>): Record<string, unknown> {
+  private extractFirstListing(raw: Record<string, unknown>): SixListingRecord {
     const listings = this.extractListings(raw);
     return listings[0] ?? {};
+  }
+
+  private getListingValorBc(listing: SixListingRecord): string {
+    const lookup = listing.lookup as Record<string, unknown> | undefined;
+    return String(
+      listing.valorBc ??
+      listing.valor_bc ??
+      listing.requestedId ??
+      lookup?.valorBc ??
+      '',
+    );
+  }
+
+  private getListingName(listing: SixListingRecord): string | null {
+    const lookup = listing.lookup as Record<string, unknown> | undefined;
+    return (lookup?.listingShortName as string) ?? (listing.shortName as string) ?? (listing.instrumentName as string) ?? null;
+  }
+
+  private getListingCurrency(listing: SixListingRecord): string | null {
+    const lookup = listing.lookup as Record<string, unknown> | undefined;
+    return (lookup?.listingCurrency as string) ?? (listing.currency as string) ?? null;
+  }
+
+  private getListingSnapshot(listing: SixListingRecord): Record<string, unknown> {
+    const marketData = listing.marketData as Record<string, unknown> | undefined;
+    const intraday = marketData?.intradaySnapshot;
+    if (intraday && typeof intraday === 'object') {
+      return intraday as Record<string, unknown>;
+    }
+    return listing;
+  }
+
+  private snapshotNumber(listing: SixListingRecord, ...keys: string[]): number | null {
+    const snapshot = this.getListingSnapshot(listing);
+    for (const key of keys) {
+      const rawValue = snapshot[key];
+      if (rawValue && typeof rawValue === 'object' && 'value' in (rawValue as Record<string, unknown>)) {
+        const nestedValue = Number((rawValue as Record<string, unknown>).value);
+        if (Number.isFinite(nestedValue)) {
+          return nestedValue;
+        }
+      }
+      const flatValue = Number(rawValue);
+      if (Number.isFinite(flatValue)) {
+        return flatValue;
+      }
+    }
+    return null;
   }
 
   private safeNumber(obj: Record<string, unknown>, key: string): number | null {

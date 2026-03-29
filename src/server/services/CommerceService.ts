@@ -31,6 +31,35 @@ import type {
   X402SettlementInput,
 } from '../types/index';
 import { SolanaService } from './SolanaService';
+import type { PaymentCurrency } from '../types/index';
+
+const SOLANA_DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const SOLANA_DEVNET_EURC_MINT = 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr';
+
+interface ResolvedAsset {
+  symbol: string;
+  mintAddress: string | null;
+  decimals: number;
+}
+
+function resolvePaymentCurrency(
+  currency: PaymentCurrency | undefined,
+  stableAsset: { symbol: string; mintAddress: string; decimals: number } | null,
+): ResolvedAsset {
+  switch (currency) {
+    case 'SOL':
+      return { symbol: 'SOL', mintAddress: null, decimals: 9 };
+    case 'EURC':
+      return { symbol: 'EURC', mintAddress: SOLANA_DEVNET_EURC_MINT, decimals: 6 };
+    case 'USDC':
+      return { symbol: 'USDC', mintAddress: SOLANA_DEVNET_USDC_MINT, decimals: 6 };
+    default:
+      if (stableAsset) {
+        return { symbol: stableAsset.symbol, mintAddress: stableAsset.mintAddress, decimals: stableAsset.decimals };
+      }
+      return { symbol: 'USDC', mintAddress: SOLANA_DEVNET_USDC_MINT, decimals: 6 };
+  }
+}
 import { TreasuryGuardService } from './TreasuryGuardService';
 
 const require = createRequire(import.meta.url);
@@ -206,6 +235,8 @@ export class CommerceService {
       throw new Error('Bootstrap the treasury before creating payment links.');
     }
 
+    const asset = resolvePaymentCurrency(input.currency, stableAsset);
+
     await prisma.paymentLink.create({
       data: {
         profileId,
@@ -213,9 +244,9 @@ export class CommerceService {
         slug: createSlug('pay'),
         title: input.title.trim(),
         description: input.description?.trim() || null,
-        assetSymbol: stableAsset.symbol,
-        mintAddress: stableAsset.mintAddress,
-        amountRaw: Math.round(input.amount * 10 ** stableAsset.decimals).toString(),
+        assetSymbol: asset.symbol,
+        mintAddress: asset.mintAddress,
+        amountRaw: Math.round(input.amount * 10 ** asset.decimals).toString(),
         amountDisplay: input.amount.toFixed(2),
         destinationAddress: profile.walletAddress,
         customerName: input.customerName?.trim() || null,
@@ -236,6 +267,8 @@ export class CommerceService {
       throw new Error('Bootstrap the treasury before creating payout claim links.');
     }
 
+    const asset = resolvePaymentCurrency(input.currency, stableAsset);
+
     await prisma.paymentLink.create({
       data: {
         profileId,
@@ -243,9 +276,9 @@ export class CommerceService {
         slug: createSlug('claim'),
         title: input.title.trim(),
         description: input.description?.trim() || null,
-        assetSymbol: stableAsset.symbol,
-        mintAddress: stableAsset.mintAddress,
-        amountRaw: Math.round(input.amount * 10 ** stableAsset.decimals).toString(),
+        assetSymbol: asset.symbol,
+        mintAddress: asset.mintAddress,
+        amountRaw: Math.round(input.amount * 10 ** asset.decimals).toString(),
         amountDisplay: input.amount.toFixed(2),
         destinationAddress: treasury.actors.treasuryAddress,
         customerName: input.customerName?.trim() || null,
@@ -266,6 +299,8 @@ export class CommerceService {
       throw new Error('Bootstrap the treasury before creating invoices.');
     }
 
+    const asset = resolvePaymentCurrency(input.currency, stableAsset);
+
     const invoice = await prisma.invoice.create({
       data: {
         profileId,
@@ -274,10 +309,10 @@ export class CommerceService {
         description: input.description?.trim() || null,
         customerName: input.customerName.trim(),
         customerEmail: input.customerEmail?.trim() || null,
-        amountRaw: Math.round(input.amount * 10 ** stableAsset.decimals).toString(),
+        amountRaw: Math.round(input.amount * 10 ** asset.decimals).toString(),
         amountDisplay: input.amount.toFixed(2),
-        assetSymbol: stableAsset.symbol,
-        mintAddress: stableAsset.mintAddress,
+        assetSymbol: asset.symbol,
+        mintAddress: asset.mintAddress,
         dueDate: input.dueDate ? new Date(input.dueDate) : null,
         status: InvoiceStatus.SENT,
       },

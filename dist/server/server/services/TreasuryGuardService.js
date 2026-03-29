@@ -3,6 +3,8 @@ import { PolicyEngine } from './PolicyEngine.js';
 import { ResourceValidationService } from './ResourceValidationService.js';
 const require = createRequire(import.meta.url);
 const { ComplianceExporter } = require('@veridex/agentic-payments');
+const SOLANA_DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const SOLANA_DEVNET_USDC_DECIMALS = 6;
 function createId(prefix) {
     return `${prefix}_${crypto.randomUUID()}`;
 }
@@ -42,11 +44,15 @@ export class TreasuryGuardService {
         const operator = this.solana.generateKeypair();
         const approver = this.solana.generateKeypair();
         const auditor = this.solana.generateKeypair();
-        await this.solana.requestAirdrop(treasury.publicKey, 2);
         const stableAsset = request.assetMode === 'external-mint' && request.externalMintAddress
             ? await this.solana.validateMint(request.externalMintAddress)
-            : await this.solana.createManagedStableMint(treasury, 'USDX', ensureNumber(request.initialMintAmount, 250_000));
-        await this.solana.ensureTokenAccount(treasury, treasury.publicKey, stableAsset.mintAddress);
+            : {
+                decimals: SOLANA_DEVNET_USDC_DECIMALS,
+                mintAddress: SOLANA_DEVNET_USDC_MINT,
+                mode: 'external-mint',
+                supply: undefined,
+                symbol: 'USDC',
+            };
         const policy = {
             id: createId('policy'),
             institutionName: 'Veridex Treasury Guard',
@@ -78,9 +84,10 @@ export class TreasuryGuardService {
                 ...state.metadata,
                 notes: [
                     'Bootstrapped with live Solana devnet identities.',
-                    stableAsset.mode === 'managed-mint'
-                        ? 'Created a managed SPL stable asset for the self-contained demo.'
-                        : 'Configured an external Solana stablecoin mint.',
+                    request.externalMintAddress
+                        ? 'Configured the requested external Solana stablecoin mint.'
+                        : 'Configured the Solana devnet USDC mint for settlement without automatic funding.',
+                    'Treasury initialization does not airdrop or fund wallets automatically. Fund the treasury wallet manually only when settlement requires it.',
                 ],
             },
         };

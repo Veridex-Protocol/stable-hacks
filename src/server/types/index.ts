@@ -475,10 +475,13 @@ export interface WorkspaceFundingInput extends WorkspaceAccessInput {
   amount?: number;
 }
 
+export type PaymentCurrency = 'SOL' | 'USDC' | 'EURC';
+
 export interface CreatePaymentLinkInput extends WorkspaceAccessInput {
   title: string;
   description?: string;
   amount: number;
+  currency?: PaymentCurrency;
   customerName?: string;
   customerEmail?: string;
   expiresAt?: string;
@@ -489,6 +492,7 @@ export interface CreateClaimLinkInput extends WorkspaceAccessInput {
   title: string;
   description?: string;
   amount: number;
+  currency?: PaymentCurrency;
   customerName?: string;
   customerEmail?: string;
   expiresAt?: string;
@@ -501,6 +505,7 @@ export interface CreateInvoiceInput extends WorkspaceAccessInput {
   customerName: string;
   customerEmail?: string;
   amount: number;
+  currency?: PaymentCurrency;
   dueDate?: string;
 }
 

@@ -1,5 +1,6 @@
 import { bootstrapTreasuryFormAction, refreshValidationsFormAction } from "@/app/actions";
 import { getTreasuryState } from "@/app/lib/server-data";
+import { ErrorBanner } from "@/components/dashboard/ErrorBanner";
 import {
   DashboardPageHeader,
   DashboardPanel,
@@ -10,12 +11,24 @@ import {
   cn,
 } from "@/components/dashboard/primitives";
 
-export default async function PolicyWorkspace() {
+export default async function PolicyWorkspace({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string; bootstrapped?: string }>;
+}) {
+  const params = await searchParams;
   const treasury = await getTreasuryState();
   const policy = treasury.policy;
 
   return (
     <div className="space-y-8">
+      {params.error ? <ErrorBanner message={params.error} /> : null}
+      {params.bootstrapped ? (
+        <ErrorBanner
+          tone="success"
+          message="Treasury vault initialized successfully. Policy controls and treasury actors are now ready."
+        />
+      ) : null}
       <DashboardPanel className="p-7 sm:p-8">
         <DashboardPageHeader
           eyebrow="Policy workspace"
@@ -28,7 +41,8 @@ export default async function PolicyWorkspace() {
               </form>
               {!policy ? (
                 <form action={bootstrapTreasuryFormAction}>
-                  <button className={dashboardButtonClassName}>Bootstrap treasury</button>
+                  <input type="hidden" name="returnTo" value="/dashboard/policy" />
+                  <button className={dashboardButtonClassName}>Initialize treasury vault</button>
                 </form>
               ) : null}
             </>

@@ -9,6 +9,7 @@ import {
   WORKSPACE_SESSION_COOKIE,
   getWorkspaceCookieState,
 } from '@/app/lib/server-data';
+import { debugLog } from '@/server/utils/debugLog';
 import type {
   ClaimPaymentLinkInput,
   CounterpartyInput,
@@ -99,25 +100,54 @@ export async function logoutWorkspaceAction(): Promise<void> {
 export async function bootstrapTreasuryAction(): Promise<ActionResult<DashboardState>> {
   try {
     const { treasuryGuard } = getServerRuntime();
+    debugLog('treasury.action', 'bootstrap action started');
     const state = await treasuryGuard.bootstrap();
+    debugLog('treasury.action', 'bootstrap action completed', {
+      treasuryAddress: state.actors.treasuryAddress,
+      mintAddress: state.summary.stableAsset?.mintAddress,
+      mode: state.summary.stableAsset?.mode,
+    });
     revalidateWorkspaceViews();
     return { success: true, data: state };
   } catch (error) {
+    debugLog(
+      'treasury.action',
+      'bootstrap action failed',
+      {
+        error: error instanceof Error ? error.message : 'Unknown server error.',
+      },
+      { level: 'warn' },
+    );
     return failure(error);
   }
 }
 
 export async function bootstrapTreasuryFormAction(formData: FormData): Promise<void> {
   const returnTo = String(formData.get('returnTo') || '').trim();
+  debugLog('treasury.action', 'bootstrap form submitted', {
+    returnTo: returnTo || '(none)',
+  });
   const result = await bootstrapTreasuryAction();
 
   if (!result.success) {
+    debugLog(
+      'treasury.action',
+      'bootstrap form redirecting with error',
+      {
+        returnTo: returnTo || '(none)',
+        error: result.error,
+      },
+      { level: 'warn' },
+    );
     if (returnTo) {
       redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}error=${encodeURIComponent(result.error)}`);
     }
     return;
   }
 
+  debugLog('treasury.action', 'bootstrap form redirecting with success', {
+    returnTo: returnTo || '(none)',
+  });
   if (returnTo) {
     redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}bootstrapped=1`);
   }
@@ -189,10 +219,12 @@ export async function createPaymentLinkAction(
 }
 
 export async function createPaymentLinkFormAction(formData: FormData): Promise<void> {
+  const currency = String(formData.get('currency') || '') as 'SOL' | 'USDC' | 'EURC' | '';
   const result = await createPaymentLinkAction({
     title: String(formData.get('title') || ''),
     description: String(formData.get('description') || ''),
     amount: Number(formData.get('amount') || 0),
+    currency: currency === 'SOL' || currency === 'USDC' || currency === 'EURC' ? currency : undefined,
     customerName: String(formData.get('customerName') || ''),
     customerEmail: String(formData.get('customerEmail') || ''),
     expiresAt: String(formData.get('expiresAt') || ''),
@@ -219,10 +251,12 @@ export async function createClaimLinkAction(
 }
 
 export async function createClaimLinkFormAction(formData: FormData): Promise<void> {
+  const currency = String(formData.get('currency') || '') as 'SOL' | 'USDC' | 'EURC' | '';
   const result = await createClaimLinkAction({
     title: String(formData.get('title') || ''),
     description: String(formData.get('description') || ''),
     amount: Number(formData.get('amount') || 0),
+    currency: currency === 'SOL' || currency === 'USDC' || currency === 'EURC' ? currency : undefined,
     customerName: String(formData.get('customerName') || ''),
     customerEmail: String(formData.get('customerEmail') || ''),
     expiresAt: String(formData.get('expiresAt') || ''),
@@ -254,12 +288,14 @@ export async function createInvoiceAction(
 }
 
 export async function createInvoiceFormAction(formData: FormData): Promise<void> {
+  const currency = String(formData.get('currency') || '') as 'SOL' | 'USDC' | 'EURC' | '';
   const result = await createInvoiceAction({
     title: String(formData.get('title') || ''),
     description: String(formData.get('description') || ''),
     customerName: String(formData.get('customerName') || ''),
     customerEmail: String(formData.get('customerEmail') || ''),
     amount: Number(formData.get('amount') || 0),
+    currency: currency === 'SOL' || currency === 'USDC' || currency === 'EURC' ? currency : undefined,
     dueDate: String(formData.get('dueDate') || ''),
   });
   if (!result.success) {

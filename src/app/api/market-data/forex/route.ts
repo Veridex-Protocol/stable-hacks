@@ -16,8 +16,8 @@ export async function GET() {
     return NextResponse.json({ data: rates });
   } catch (error) {
     return NextResponse.json(
-      { data: [], error: error instanceof Error ? error.message : "Failed to fetch forex rates." },
-      { status: 502 },
+      { data: [], error: error instanceof Error ? error.message : "Failed to fetch forex rates.", degraded: true },
+      { status: 200 },
     );
   }
 }
