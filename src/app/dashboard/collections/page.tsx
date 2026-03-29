@@ -132,7 +132,7 @@ export default async function CollectionsPage({
         <div className="mt-8 grid gap-6 xl:grid-cols-3">
           <form action={createPaymentLinkFormAction} className={cn(dashboardSubPanelClassName, "p-5")}>
             <h2 className="text-lg font-semibold text-white">Payment link</h2>
-            <p className="mt-2 text-sm leading-6 text-zinc-400">Human-friendly collection page with optional x402 endpoint for agentic payment flows.</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">Human-friendly collection page with wallet-ready checkout support for Phantom, MetaMask-compatible Solana wallets, custodial wallets, and optional x402 agent flows.</p>
             <div className="mt-5 space-y-4">
               <input name="title" required className={dashboardInputClassName} placeholder="Quarterly treasury retainer" />
               <div className="grid grid-cols-[1fr_auto] gap-2">
@@ -160,7 +160,7 @@ export default async function CollectionsPage({
           <form action={createClaimLinkFormAction} className={cn(dashboardSubPanelClassName, "p-5")}>
             <h2 className="text-lg font-semibold text-white">Payout claim link</h2>
             <p className="mt-2 text-sm leading-6 text-zinc-400">
-              Issue a claimable payout that can be settled by a human or an agent, based on the selected mode.
+              Issue a claimable payout that can be settled by a human or an agent, with recipient flows for Phantom, MetaMask-compatible Solana wallets, and custodial wallets.
               {!treasuryReady ? " If this is your first claim link, the treasury vault will initialize automatically before the link is created." : ""}
             </p>
             <div className="mt-5 space-y-4">

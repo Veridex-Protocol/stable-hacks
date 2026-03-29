@@ -203,6 +203,56 @@ export async function seedStablecoinFormAction(formData: FormData): Promise<void
   await seedStablecoinAction(Number.isFinite(amount) && amount > 0 ? amount : 250);
 }
 
+export async function recordWalletSendAction(input: {
+  assetSymbol: string;
+  mintAddress?: string | null;
+  amountRaw: string;
+  amountDisplay: string;
+  destinationAddress: string;
+  transactionHash?: string | null;
+  explorerUrl?: string | null;
+  notes?: string | null;
+  status?: 'pending' | 'confirmed' | 'failed';
+}): Promise<ActionResult<TreasuryWorkspaceState>> {
+  try {
+    const { workspaceService } = getServerRuntime();
+    const { profileId, sessionId } = await requireWorkspaceIdentity();
+
+    debugLog('wallet.send', 'record wallet send action started', {
+      profileId,
+      assetSymbol: input.assetSymbol,
+      destinationAddress: input.destinationAddress,
+      amountDisplay: input.amountDisplay,
+      status: input.status || 'pending',
+      transactionHash: input.transactionHash || null,
+    });
+
+    const state = await workspaceService.recordManualWalletSend(profileId, sessionId ?? undefined, {
+      ...input,
+      status:
+        input.status === 'confirmed'
+          ? 'CONFIRMED'
+          : input.status === 'failed'
+            ? 'FAILED'
+            : 'PENDING',
+    });
+
+    revalidateWorkspaceViews();
+    return { success: true, data: state };
+  } catch (error) {
+    debugLog(
+      'wallet.send',
+      'record wallet send action failed',
+      {
+        error: error instanceof Error ? error.message : 'Unknown server error.',
+        transactionHash: input.transactionHash || null,
+      },
+      { level: 'warn' },
+    );
+    return failure(error);
+  }
+}
+
 export async function createPaymentLinkAction(
   input: Omit<CreatePaymentLinkInput, 'sessionId'>,
 ): Promise<ActionResult<TreasuryWorkspaceState>> {

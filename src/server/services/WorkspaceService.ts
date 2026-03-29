@@ -11,6 +11,7 @@ import {
 } from '@prisma/client';
 import { prisma } from '../db';
 import { getVeridexRelayerApiUrl, normalizeRelayerApiUrl } from '@/lib/veridex-auth';
+import { debugLog } from '@/server/utils/debugLog';
 import type {
   AuthSessionRecord,
   FundingEventRecord,
@@ -374,6 +375,56 @@ export class WorkspaceService {
         signature: result.signature,
         explorerUrl: result.explorerUrl,
         notes: 'Treasury seeded the connected wallet with Solana stable liquidity.',
+      },
+    });
+
+    await this.captureAssets(profile.id, profile.walletAddress);
+    return this.getWorkspaceState(profile.id, sessionId);
+  }
+
+  async recordManualWalletSend(
+    profileId: string,
+    sessionId: string | undefined,
+    input: {
+      assetSymbol: string;
+      mintAddress?: string | null;
+      amountRaw: string;
+      amountDisplay: string;
+      destinationAddress: string;
+      transactionHash?: string | null;
+      explorerUrl?: string | null;
+      notes?: string | null;
+      status?: FundingEventStatus;
+    },
+  ): Promise<TreasuryWorkspaceState> {
+    const profile = await this.ensureAuthorizedProfile(profileId, sessionId);
+
+    const eventStatus = input.status ?? FundingEventStatus.PENDING;
+    debugLog('wallet.send', 'recording passkey wallet send activity', {
+      profileId: profile.id,
+      assetSymbol: input.assetSymbol,
+      destinationAddress: input.destinationAddress,
+      amountDisplay: input.amountDisplay,
+      status: eventStatus.toLowerCase(),
+      transactionHash: input.transactionHash || null,
+    });
+
+    await prisma.fundingEvent.create({
+      data: {
+        profileId: profile.id,
+        eventType: FundingEventType.MANUAL,
+        status: eventStatus,
+        assetSymbol: input.assetSymbol,
+        mintAddress: input.mintAddress || null,
+        amountRaw: input.amountRaw,
+        amountDisplay: input.amountDisplay,
+        sourceAddress: profile.walletAddress,
+        destinationAddress: input.destinationAddress,
+        signature: input.transactionHash || null,
+        explorerUrl: input.explorerUrl || null,
+        notes:
+          input.notes ||
+          'Passkey wallet transfer submitted through the Veridex relayer. The Hub transaction may confirm before the Solana spoke balance refresh completes.',
       },
     });
 

@@ -3,7 +3,7 @@ export default function FeatureGrid() {
     <section id="features" className="relative bg-surface-container-lowest/40 py-24 px-8">
       <div className="max-w-7xl mx-auto">
         <div className="mb-16">
-          <h2 className="text-3xl font-headline font-bold mb-4">The Judge-Friendly Flow</h2>
+          <h2 className="text-3xl font-headline font-bold mb-4">Our Flow</h2>
           <div className="h-1 w-20 bg-primary"></div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">

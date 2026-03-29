@@ -3,8 +3,8 @@ export default function PayoutPipeline() {
     <section className="py-24 px-8 overflow-hidden">
       <div className="max-w-7xl mx-auto">
         <div className="text-center mb-20">
-          <h2 className="text-4xl font-headline font-extrabold mb-4">The Live Demo Sequence</h2>
-          <p className="text-on-surface-variant max-w-2xl mx-auto">A single four-step path that takes judges from passkey reconnect to Solana receipt evidence without changing products mid-demo.</p>
+          <h2 className="text-4xl font-headline font-extrabold mb-4">Sequence</h2>
+          <p className="text-on-surface-variant max-w-2xl mx-auto">A single four-step path that takes you from passkey reconnect to Solana receipt evidence without changing products mid-demo.</p>
         </div>
         <div className="relative">
           {/* Progress Line */}

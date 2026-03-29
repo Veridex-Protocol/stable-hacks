@@ -21,6 +21,7 @@ import {
   dashboardSubPanelClassName,
   cn,
 } from "@/components/dashboard/primitives";
+import { PasskeyDirectSendPanel } from "@/components/dashboard/PasskeyDirectSendPanel";
 import { WalletCard } from "@/components/dashboard/WalletCard";
 import { OnboardingWelcome } from "@/components/dashboard/OnboardingWelcome";
 
@@ -306,16 +307,25 @@ export default async function DashboardOverview({
             </div>
           )}
 
+          <PasskeyDirectSendPanel
+            assets={workspace.assets}
+            walletAddress={workspace.profile.walletAddress}
+            authSessionSource={workspace.authSession?.source ?? null}
+            relayerApiUrl={workspace.guidance.relayerUrl}
+          />
+
           <div className={cn(dashboardSubPanelClassName, "mt-6 p-5")}>
-            <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Latest funding event</p>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Latest wallet activity</p>
             {latestFunding ? (
               <div className="mt-4 space-y-2 text-sm text-zinc-300">
                 <p>Type: {latestFunding.eventType}</p>
                 <p>Amount: {latestFunding.amountDisplay} {latestFunding.assetSymbol}</p>
                 <p>Status: {latestFunding.status}</p>
+                {latestFunding.destinationAddress ? <p>Destination: {latestFunding.destinationAddress}</p> : null}
+                {latestFunding.notes ? <p className="text-zinc-400">{latestFunding.notes}</p> : null}
               </div>
             ) : (
-              <p className="mt-4 text-sm leading-7 text-zinc-400">No wallet funding has been requested yet.</p>
+              <p className="mt-4 text-sm leading-7 text-zinc-400">No wallet funding or send activity has been recorded yet.</p>
             )}
           </div>
         </DashboardPanel>
