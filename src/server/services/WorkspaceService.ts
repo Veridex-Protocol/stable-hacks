@@ -36,6 +36,7 @@ const RELAYER_API_CANDIDATES = Array.from(
 const DEFAULT_FAUCET_URL = 'https://faucet.circle.com/';
 const SESSION_REVALIDATION_WINDOW_MS = 5 * 60 * 1000;
 const LOCAL_SESSION_PREFIX = 'local_';
+const PERSISTENCE_WARNING_INTERVAL_MS = 10_000;
 
 interface RelayerSessionPayload {
   id: string;
@@ -95,6 +96,9 @@ function toFundingStatus(status: FundingEventStatus): FundingEventRecord['status
 
 export class WorkspaceService {
   private readonly commerce: CommerceService;
+  private readonly workspaceCache = new Map<string, TreasuryWorkspaceState>();
+  private readonly sessionProfileIndex = new Map<string, string>();
+  private lastPersistenceWarningAt = 0;
 
   constructor(
     private readonly solana: SolanaService,
@@ -208,85 +212,116 @@ export class WorkspaceService {
 
     await this.captureAssets(profile.id, profile.walletAddress);
 
-    return this.getWorkspaceState(profile.id, relayerSession.id);
+    return this.cacheState(await this.getWorkspaceState(profile.id, relayerSession.id));
   }
 
   async getWorkspaceState(profileId: string, sessionId?: string): Promise<TreasuryWorkspaceState> {
-    await this.expireStaleSessions(profileId);
+    // Fire-and-forget: stale session cleanup should not block workspace reads
+    this.expireStaleSessions(profileId).catch(() => {});
+    try {
+      const profile = await prisma.treasuryProfile.findUnique({
+        where: { id: profileId },
+      });
 
-    const profile = await prisma.treasuryProfile.findUnique({
-      where: { id: profileId },
-    });
+      if (!profile) {
+        throw new Error('Connected wallet profile not found.');
+      }
 
-    if (!profile) {
-      throw new Error('Connected wallet profile not found.');
+      const activeSession = sessionId
+        ? await prisma.authSession.findFirst({
+            where: { profileId, serverSessionId: sessionId },
+            orderBy: { updatedAt: 'desc' },
+          })
+        : await prisma.authSession.findFirst({
+            where: { profileId, status: AuthSessionStatus.ACTIVE },
+            orderBy: { updatedAt: 'desc' },
+          });
+
+      const latestSnapshot = await prisma.assetSnapshot.findFirst({
+        where: { profileId },
+        orderBy: { capturedAt: 'desc' },
+      });
+
+      const assetRows = latestSnapshot
+        ? await prisma.assetSnapshot.findMany({
+            where: { profileId, captureId: latestSnapshot.captureId },
+            orderBy: { capturedAt: 'desc' },
+          })
+        : [];
+
+      const fundingEvents = await prisma.fundingEvent.findMany({
+        where: { profileId },
+        orderBy: { createdAt: 'desc' },
+        take: 8,
+      });
+      const commerce = await this.commerce.getProfileCommerce(
+        profile.id,
+        profile.authOrigin || 'http://localhost:5173',
+      );
+
+      const treasury = await this.treasuryGuard.getDashboardState();
+
+      return this.cacheState({
+        profile: this.mapProfile(profile),
+        authSession: activeSession ? this.mapAuthSession(activeSession) : null,
+        assets: assetRows.map((row) => this.mapAsset(row)),
+        fundingEvents: fundingEvents.map((row) => this.mapFundingEvent(row)),
+        paymentLinks: commerce.paymentLinks,
+        invoices: commerce.invoices,
+        receipts: commerce.receipts,
+        treasury: {
+          ready: Boolean(treasury.policy && treasury.summary.stableAsset),
+          vaultAddress: treasury.actors.treasuryAddress,
+          explorerUrl: treasury.summary.explorerAddressUrl,
+          stableAsset: treasury.summary.stableAsset,
+        },
+        guidance: this.buildGuidance(profile.walletExplorerUrl),
+      });
+    } catch (error) {
+      this.logPersistenceFallback('getWorkspaceState', error);
+
+      const cachedState = this.getCachedState(profileId, sessionId);
+      if (!cachedState) {
+        throw error;
+      }
+
+      const treasury = await this.treasuryGuard.getDashboardState();
+      const assets = await this.readLiveAssets(cachedState.profile.id, cachedState.profile.walletAddress).catch(
+        () => cachedState.assets,
+      );
+
+      return this.cacheState({
+        ...cachedState,
+        assets,
+        treasury: {
+          ready: Boolean(treasury.policy && treasury.summary.stableAsset),
+          vaultAddress: treasury.actors.treasuryAddress,
+          explorerUrl: treasury.summary.explorerAddressUrl,
+          stableAsset: treasury.summary.stableAsset,
+        },
+        guidance: this.buildGuidance(cachedState.profile.walletExplorerUrl),
+      });
     }
-
-    const activeSession = sessionId
-      ? await prisma.authSession.findFirst({
-          where: { profileId, serverSessionId: sessionId },
-          orderBy: { updatedAt: 'desc' },
-        })
-      : await prisma.authSession.findFirst({
-          where: { profileId, status: AuthSessionStatus.ACTIVE },
-          orderBy: { updatedAt: 'desc' },
-        });
-
-    const latestSnapshot = await prisma.assetSnapshot.findFirst({
-      where: { profileId },
-      orderBy: { capturedAt: 'desc' },
-    });
-
-    const assetRows = latestSnapshot
-      ? await prisma.assetSnapshot.findMany({
-          where: { profileId, captureId: latestSnapshot.captureId },
-          orderBy: { capturedAt: 'desc' },
-        })
-      : [];
-
-    const fundingEvents = await prisma.fundingEvent.findMany({
-      where: { profileId },
-      orderBy: { createdAt: 'desc' },
-      take: 8,
-    });
-    const commerce = await this.commerce.getProfileCommerce(
-      profile.id,
-      profile.authOrigin || 'http://localhost:5173',
-    );
-
-    const treasury = await this.treasuryGuard.getDashboardState();
-
-    return {
-      profile: this.mapProfile(profile),
-      authSession: activeSession ? this.mapAuthSession(activeSession) : null,
-      assets: assetRows.map((row) => this.mapAsset(row)),
-      fundingEvents: fundingEvents.map((row) => this.mapFundingEvent(row)),
-      paymentLinks: commerce.paymentLinks,
-      invoices: commerce.invoices,
-      receipts: commerce.receipts,
-      treasury: {
-        ready: Boolean(treasury.policy && treasury.summary.stableAsset),
-        vaultAddress: treasury.actors.treasuryAddress,
-        explorerUrl: treasury.summary.explorerAddressUrl,
-        stableAsset: treasury.summary.stableAsset,
-      },
-      guidance: {
-        faucetUrl: DEFAULT_FAUCET_URL,
-        explorerUrl: profile.walletExplorerUrl,
-        relayerUrl: RELAYER_API_CANDIDATES[0] || RELAYER_API_FALLBACK,
-        fundingSteps: [
-          'Authenticate with your passkey to create either a local workspace session or a relayer-backed Auth Session, then persist wallet ownership.',
-          'Use the built-in devnet SOL airdrop to pay for token account creation and testnet activity.',
-          'If the treasury is bootstrapped, seed the wallet with the managed Solana stable asset to exercise payment flows.',
-        ],
-      },
-    };
   }
 
   async refreshAssets(profileId: string, sessionId?: string): Promise<TreasuryWorkspaceState> {
     const profile = await this.ensureAuthorizedProfile(profileId, sessionId);
     await this.captureAssets(profile.id, profile.walletAddress);
     return this.getWorkspaceState(profile.id, sessionId);
+  }
+
+  async getLiveAssets(profileId: string, sessionId?: string): Promise<TrackedAssetSnapshot[]> {
+    try {
+      const profile = await this.ensureAuthorizedProfile(profileId, sessionId);
+      return this.readLiveAssets(profile.id, profile.walletAddress);
+    } catch (error) {
+      this.logPersistenceFallback('getLiveAssets', error);
+      const cachedState = this.getCachedState(profileId, sessionId);
+      if (!cachedState) {
+        throw error;
+      }
+      return this.readLiveAssets(cachedState.profile.id, cachedState.profile.walletAddress);
+    }
   }
 
   async requestWalletAirdrop(
@@ -349,96 +384,118 @@ export class WorkspaceService {
   private async ensureAuthorizedProfile(
     profileId: string,
     sessionId?: string,
-  ): Promise<TreasuryProfile> {
+  ): Promise<Pick<TreasuryProfile, 'id' | 'walletAddress' | 'walletExplorerUrl' | 'authOrigin'>> {
     if (!sessionId) {
       throw new Error('An active Auth Session is required for this action.');
     }
 
-    const profile = await prisma.treasuryProfile.findUnique({
-      where: { id: profileId },
-    });
-
-    if (!profile) {
-      throw new Error('Connected wallet profile not found.');
-    }
-
-    const session = await prisma.authSession.findFirst({
-      where: { profileId, serverSessionId: sessionId },
-      orderBy: { updatedAt: 'desc' },
-    });
-
-    if (!session) {
-      throw new Error('Stored Auth Session not found for this wallet.');
-    }
-
-    if (session.expiresAt.getTime() <= Date.now()) {
-      await prisma.authSession.update({
-        where: { id: session.id },
-        data: { status: AuthSessionStatus.EXPIRED },
-      });
-      throw new Error('The current Auth Session has expired. Re-authenticate to continue.');
-    }
-
-    if (isLocalSessionId(session.serverSessionId)) {
-      return profile;
-    }
-
-    if (
-      !session.lastValidatedAt ||
-      Date.now() - session.lastValidatedAt.getTime() > SESSION_REVALIDATION_WINDOW_MS
-    ) {
-      const relayerSession = await this.validateRelayerSession(session.serverSessionId);
-      await prisma.authSession.update({
-        where: { id: session.id },
-        data: {
-          lastValidatedAt: new Date(),
-          status: relayerSession ? AuthSessionStatus.ACTIVE : AuthSessionStatus.INVALID,
-        },
+    try {
+      const profile = await prisma.treasuryProfile.findUnique({
+        where: { id: profileId },
       });
 
-      if (!relayerSession) {
-        throw new Error('The stored Auth Session is no longer valid with the relayer.');
+      if (!profile) {
+        throw new Error('Connected wallet profile not found.');
       }
-    }
 
-    return profile;
+      const session = await prisma.authSession.findFirst({
+        where: { profileId, serverSessionId: sessionId },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      if (!session) {
+        throw new Error('Stored Auth Session not found for this wallet.');
+      }
+
+      if (session.expiresAt.getTime() <= Date.now()) {
+        await prisma.authSession.update({
+          where: { id: session.id },
+          data: { status: AuthSessionStatus.EXPIRED },
+        });
+        throw new Error('The current Auth Session has expired. Re-authenticate to continue.');
+      }
+
+      if (!isLocalSessionId(session.serverSessionId)) {
+        if (
+          !session.lastValidatedAt ||
+          Date.now() - session.lastValidatedAt.getTime() > SESSION_REVALIDATION_WINDOW_MS
+        ) {
+          const relayerSession = await this.validateRelayerSession(session.serverSessionId);
+          await prisma.authSession.update({
+            where: { id: session.id },
+            data: {
+              lastValidatedAt: new Date(),
+              status: relayerSession ? AuthSessionStatus.ACTIVE : AuthSessionStatus.INVALID,
+            },
+          });
+
+          if (!relayerSession) {
+            throw new Error('The stored Auth Session is no longer valid with the relayer.');
+          }
+        }
+      }
+
+      return profile;
+    } catch (error) {
+      this.logPersistenceFallback('ensureAuthorizedProfile', error);
+      const cachedState = this.getCachedState(profileId, sessionId);
+      if (
+        !cachedState?.authSession ||
+        cachedState.authSession.status !== 'active' ||
+        cachedState.authSession.expiresAt <= Date.now()
+      ) {
+        throw error;
+      }
+
+      return {
+        id: cachedState.profile.id,
+        walletAddress: cachedState.profile.walletAddress,
+        walletExplorerUrl: cachedState.profile.walletExplorerUrl,
+        authOrigin: cachedState.profile.authOrigin,
+      };
+    }
   }
 
   private async captureAssets(profileId: string, walletAddress: string): Promise<void> {
-    const dashboard = await this.treasuryGuard.getDashboardState();
-    const symbolHints = dashboard.summary.stableAsset
-      ? { [dashboard.summary.stableAsset.mintAddress]: dashboard.summary.stableAsset.symbol }
-      : {};
-    const balances = await this.solana.getWalletAssets(walletAddress, symbolHints);
+    const balances = await this.readLiveAssets(profileId, walletAddress);
     const captureId = createCaptureId();
 
-    await prisma.assetSnapshot.createMany({
-      data: balances.map((asset) => ({
-        captureId,
-        profileId,
-        walletAddress,
-        assetType: asset.assetType === 'native' ? AssetType.NATIVE : AssetType.SPL,
-        symbol: asset.symbol,
-        name: asset.name,
-        mintAddress: asset.mintAddress,
-        tokenAccount: asset.tokenAccount,
-        amountRaw: asset.amountRaw,
-        amountDisplay: asset.amountDisplay,
-        decimals: asset.decimals,
-        explorerUrl: asset.explorerUrl,
-      })),
-    });
+    try {
+      await prisma.assetSnapshot.createMany({
+        data: balances.map((asset) => ({
+          captureId,
+          profileId,
+          walletAddress,
+          assetType: asset.assetType === 'native' ? AssetType.NATIVE : AssetType.SPL,
+          symbol: asset.symbol,
+          name: asset.name,
+          mintAddress: asset.mintAddress,
+          tokenAccount: asset.tokenAccount,
+          amountRaw: asset.amountRaw,
+          amountDisplay: asset.amountDisplay,
+          decimals: asset.decimals,
+          explorerUrl: asset.explorerUrl,
+        })),
+      });
+    } catch (error) {
+      this.logPersistenceFallback('captureAssets', error);
+      this.updateCachedAssets(profileId, balances);
+    }
   }
 
   private async expireStaleSessions(profileId: string): Promise<void> {
-    await prisma.authSession.updateMany({
-      where: {
-        profileId,
-        status: AuthSessionStatus.ACTIVE,
-        expiresAt: { lte: new Date() },
-      },
-      data: { status: AuthSessionStatus.EXPIRED },
-    });
+    try {
+      await prisma.authSession.updateMany({
+        where: {
+          profileId,
+          status: AuthSessionStatus.ACTIVE,
+          expiresAt: { lte: new Date() },
+        },
+        data: { status: AuthSessionStatus.EXPIRED },
+      });
+    } catch (error) {
+      this.logPersistenceFallback('expireStaleSessions', error);
+    }
   }
 
   private async validateRelayerSession(sessionId: string): Promise<RelayerSessionPayload | null> {
@@ -467,6 +524,92 @@ export class WorkspaceService {
     }
 
     return null;
+  }
+
+  private async readLiveAssets(profileId: string, walletAddress: string): Promise<TrackedAssetSnapshot[]> {
+    const dashboard = await this.treasuryGuard.getDashboardState();
+    const symbolHints = dashboard.summary.stableAsset
+      ? { [dashboard.summary.stableAsset.mintAddress]: dashboard.summary.stableAsset.symbol }
+      : {};
+    const balances = await this.solana.getWalletAssets(walletAddress, symbolHints);
+
+    return balances.map((asset, index) => ({
+      id: `live_${profileId}_${index}_${asset.symbol}_${asset.mintAddress || 'native'}`,
+      captureId: 'live',
+      assetType: asset.assetType === 'native' ? 'native' : 'spl',
+      symbol: asset.symbol,
+      name: asset.name,
+      mintAddress: asset.mintAddress,
+      tokenAccount: asset.tokenAccount,
+      amountRaw: asset.amountRaw,
+      amountDisplay: asset.amountDisplay,
+      decimals: asset.decimals,
+      explorerUrl: asset.explorerUrl || '',
+      capturedAt: Date.now(),
+    }));
+  }
+
+  private buildGuidance(explorerUrl: string): TreasuryWorkspaceState['guidance'] {
+    return {
+      faucetUrl: DEFAULT_FAUCET_URL,
+      explorerUrl,
+      relayerUrl: RELAYER_API_CANDIDATES[0] || RELAYER_API_FALLBACK,
+      fundingSteps: [
+        'Authenticate with your passkey to create either a local workspace session or a relayer-backed Auth Session, then persist wallet ownership.',
+        'Use the built-in devnet SOL airdrop to pay for token account creation and testnet activity.',
+        'If the treasury is bootstrapped, seed the wallet with the managed Solana stable asset to exercise payment flows.',
+      ],
+    };
+  }
+
+  private cacheState(state: TreasuryWorkspaceState): TreasuryWorkspaceState {
+    this.workspaceCache.set(state.profile.id, state);
+    if (state.authSession?.id) {
+      this.sessionProfileIndex.set(state.authSession.id, state.profile.id);
+    }
+    return state;
+  }
+
+  private getCachedState(profileId?: string, sessionId?: string): TreasuryWorkspaceState | null {
+    if (profileId && this.workspaceCache.has(profileId)) {
+      return this.workspaceCache.get(profileId) ?? null;
+    }
+
+    if (sessionId) {
+      const cachedProfileId = this.sessionProfileIndex.get(sessionId);
+      if (cachedProfileId) {
+        return this.workspaceCache.get(cachedProfileId) ?? null;
+      }
+    }
+
+    return null;
+  }
+
+  private updateCachedAssets(profileId: string, assets: TrackedAssetSnapshot[]): void {
+    const cached = this.workspaceCache.get(profileId);
+    if (!cached) {
+      return;
+    }
+
+    this.workspaceCache.set(profileId, {
+      ...cached,
+      assets,
+      profile: {
+        ...cached.profile,
+        updatedAt: Date.now(),
+      },
+    });
+  }
+
+  private logPersistenceFallback(scope: string, error: unknown): void {
+    const now = Date.now();
+    if (now - this.lastPersistenceWarningAt < PERSISTENCE_WARNING_INTERVAL_MS) {
+      return;
+    }
+
+    this.lastPersistenceWarningAt = now;
+    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    console.warn(`[stablehacks-workspace] ${scope} falling back to cached/local workspace state. ${detail}`);
   }
 
   private mapProfile(profile: TreasuryProfile): TreasuryWorkspaceProfile {

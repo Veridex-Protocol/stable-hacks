@@ -188,9 +188,18 @@ export class CommerceService {
     this.nonEvmSigner = new NonEvmPaymentSigner();
   }
 
+  private async ensureBootstrappedTreasury() {
+    const treasury = await this.treasuryGuard.getDashboardState();
+    if (treasury.summary.stableAsset && treasury.actors.treasuryAddress) {
+      return treasury;
+    }
+
+    return this.treasuryGuard.bootstrap();
+  }
+
   async createPaymentLink(profileId: string, input: CreatePaymentLinkInput): Promise<void> {
     const profile = await this.requireAuthorizedProfile(profileId, input.sessionId);
-    const treasury = await this.treasuryGuard.getDashboardState();
+    const treasury = await this.ensureBootstrappedTreasury();
     const stableAsset = treasury.summary.stableAsset;
 
     if (!stableAsset) {
@@ -220,7 +229,7 @@ export class CommerceService {
 
   async createClaimLink(profileId: string, input: CreateClaimLinkInput): Promise<void> {
     await this.requireAuthorizedProfile(profileId, input.sessionId);
-    const treasury = await this.treasuryGuard.getDashboardState();
+    const treasury = await this.ensureBootstrappedTreasury();
     const stableAsset = treasury.summary.stableAsset;
 
     if (!stableAsset || !treasury.actors.treasuryAddress) {
@@ -250,7 +259,7 @@ export class CommerceService {
 
   async createInvoice(profileId: string, input: CreateInvoiceInput): Promise<void> {
     const profile = await this.requireAuthorizedProfile(profileId, input.sessionId);
-    const treasury = await this.treasuryGuard.getDashboardState();
+    const treasury = await this.ensureBootstrappedTreasury();
     const stableAsset = treasury.summary.stableAsset;
 
     if (!stableAsset) {
@@ -294,6 +303,19 @@ export class CommerceService {
         x402Enabled: true,
         claimMode: ClaimMode.EITHER,
       },
+    });
+  }
+
+  async disablePaymentLink(profileId: string, linkId: string): Promise<void> {
+    const link = await prisma.paymentLink.findUnique({ where: { id: linkId } });
+    if (!link) throw new Error('Payment link not found.');
+    if (link.profileId !== profileId) throw new Error('Not authorized to modify this link.');
+    if (link.status !== PaymentLinkStatus.ACTIVE) {
+      throw new Error(`Cannot disable a link with status "${link.status}".`);
+    }
+    await prisma.paymentLink.update({
+      where: { id: linkId },
+      data: { status: PaymentLinkStatus.EXPIRED },
     });
   }
 

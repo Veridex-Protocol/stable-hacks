@@ -36,6 +36,25 @@ const { SolanaChainClient } = require('@veridex/agentic-payments') as typeof imp
 const SOLANA_CHAIN = getChainConfig('solana', 'testnet');
 const DEFAULT_DECIMALS = 6;
 
+function formatAmountFromBaseUnits(amountRaw: bigint, decimals: number): string {
+  if (decimals <= 0) {
+    return amountRaw.toString();
+  }
+
+  const base = 10n ** BigInt(decimals);
+  const whole = amountRaw / base;
+  const fraction = amountRaw % base;
+
+  if (fraction === 0n) {
+    return whole.toString();
+  }
+
+  return `${whole.toString()}.${fraction
+    .toString()
+    .padStart(decimals, '0')
+    .replace(/0+$/, '')}`;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -178,7 +197,7 @@ export class SolanaService {
         mintAddress: null,
         tokenAccount: null,
         amountRaw: solBalance.toString(),
-        amountDisplay: (solBalance / LAMPORTS_PER_SOL).toFixed(4),
+        amountDisplay: formatAmountFromBaseUnits(BigInt(solBalance), 9),
         decimals: 9,
         explorerUrl: this.getExplorerAddressUrl(ownerAddress),
       },

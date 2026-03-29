@@ -4,4 +4,6 @@ node_modules
 
 /src/generated/prisma
 node_modules/
+.data/
+CH56655-api2026hack32/
 .next/

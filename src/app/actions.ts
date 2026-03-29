@@ -70,6 +70,7 @@ async function requireWorkspaceIdentity(): Promise<{ profileId: string; sessionI
 function revalidateWorkspaceViews(): void {
   revalidatePath('/dashboard');
   revalidatePath('/dashboard/collections');
+  revalidatePath('/dashboard/collections/links');
   revalidatePath('/dashboard/reviews');
   revalidatePath('/dashboard/counterparties');
   revalidatePath('/dashboard/logs');
@@ -106,8 +107,20 @@ export async function bootstrapTreasuryAction(): Promise<ActionResult<DashboardS
   }
 }
 
-export async function bootstrapTreasuryFormAction(): Promise<void> {
-  await bootstrapTreasuryAction();
+export async function bootstrapTreasuryFormAction(formData: FormData): Promise<void> {
+  const returnTo = String(formData.get('returnTo') || '').trim();
+  const result = await bootstrapTreasuryAction();
+
+  if (!result.success) {
+    if (returnTo) {
+      redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}error=${encodeURIComponent(result.error)}`);
+    }
+    return;
+  }
+
+  if (returnTo) {
+    redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}bootstrapped=1`);
+  }
 }
 
 export async function refreshAssetsAction(): Promise<ActionResult<TreasuryWorkspaceState>> {
@@ -176,7 +189,7 @@ export async function createPaymentLinkAction(
 }
 
 export async function createPaymentLinkFormAction(formData: FormData): Promise<void> {
-  await createPaymentLinkAction({
+  const result = await createPaymentLinkAction({
     title: String(formData.get('title') || ''),
     description: String(formData.get('description') || ''),
     amount: Number(formData.get('amount') || 0),
@@ -185,6 +198,9 @@ export async function createPaymentLinkFormAction(formData: FormData): Promise<v
     expiresAt: String(formData.get('expiresAt') || ''),
     x402Enabled: String(formData.get('x402Enabled') || 'on') !== 'off',
   });
+  if (!result.success) {
+    redirect(`/dashboard/collections?error=${encodeURIComponent(result.error)}`);
+  }
 }
 
 export async function createClaimLinkAction(
@@ -203,7 +219,7 @@ export async function createClaimLinkAction(
 }
 
 export async function createClaimLinkFormAction(formData: FormData): Promise<void> {
-  await createClaimLinkAction({
+  const result = await createClaimLinkAction({
     title: String(formData.get('title') || ''),
     description: String(formData.get('description') || ''),
     amount: Number(formData.get('amount') || 0),
@@ -217,6 +233,9 @@ export async function createClaimLinkFormAction(formData: FormData): Promise<voi
           ? 'agent'
           : 'either',
   });
+  if (!result.success) {
+    redirect(`/dashboard/collections?error=${encodeURIComponent(result.error)}`);
+  }
 }
 
 export async function createInvoiceAction(
@@ -235,7 +254,7 @@ export async function createInvoiceAction(
 }
 
 export async function createInvoiceFormAction(formData: FormData): Promise<void> {
-  await createInvoiceAction({
+  const result = await createInvoiceAction({
     title: String(formData.get('title') || ''),
     description: String(formData.get('description') || ''),
     customerName: String(formData.get('customerName') || ''),
@@ -243,6 +262,9 @@ export async function createInvoiceFormAction(formData: FormData): Promise<void>
     amount: Number(formData.get('amount') || 0),
     dueDate: String(formData.get('dueDate') || ''),
   });
+  if (!result.success) {
+    redirect(`/dashboard/collections?error=${encodeURIComponent(result.error)}`);
+  }
 }
 
 export async function createCounterpartyAction(
@@ -373,5 +395,24 @@ export async function claimPayoutLinkAction(
     return { success: true, data: state };
   } catch (error) {
     return failure(error);
+  }
+}
+
+export async function disablePaymentLinkAction(linkId: string): Promise<ActionResult<void>> {
+  try {
+    const { profileId } = await requireWorkspaceIdentity();
+    await getServerRuntime().commerceService.disablePaymentLink(profileId, linkId);
+    revalidateWorkspaceViews();
+    return { success: true, data: undefined };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function disablePaymentLinkFormAction(formData: FormData): Promise<void> {
+  const linkId = String(formData.get('linkId') || '');
+  const result = await disablePaymentLinkAction(linkId);
+  if (!result.success) {
+    redirect(`/dashboard/collections/links?error=${encodeURIComponent(result.error)}`);
   }
 }

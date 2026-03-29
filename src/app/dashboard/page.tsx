@@ -7,6 +7,8 @@ import {
   seedStablecoinFormAction,
 } from "@/app/actions";
 import { getTreasuryState, getWorkspaceStateOrNull } from "@/app/lib/server-data";
+import { LiveAssetsPanel } from "@/components/dashboard/LiveAssetsPanel";
+import { ForexRatesWidget } from "@/components/dashboard/ForexRatesWidget";
 import {
   DashboardEmptyState,
   DashboardMetricCard,
@@ -21,8 +23,10 @@ import {
 import { WalletCard } from "@/components/dashboard/WalletCard";
 import { OnboardingWelcome } from "@/components/dashboard/OnboardingWelcome";
 
-function formatAmount(value: string) {
-  return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function formatFullAmount(value: string) {
+  const [wholePart, fractionalPart] = value.split(".");
+  const formattedWhole = Number(wholePart || "0").toLocaleString();
+  return fractionalPart ? `${formattedWhole}.${fractionalPart}` : formattedWhole;
 }
 
 export default async function DashboardOverview() {
@@ -42,6 +46,12 @@ export default async function DashboardOverview() {
   const stableAsset = treasury.summary.stableAsset;
   const latestFunding = workspace.fundingEvents[0] ?? null;
   const latestReceipt = workspace.receipts[0] ?? null;
+
+  const solAsset = workspace.assets.find((a) => a.symbol === "SOL");
+  const stableBalance = stableAsset
+    ? workspace.assets.find((a) => a.mintAddress === stableAsset.mintAddress)
+    : null;
+  const walletIsEmpty = workspace.assets.length === 0 || workspace.assets.every((a) => Number(a.amountDisplay) === 0);
   const authSessionLabel = workspace.authSession
     ? workspace.authSession.source === "local"
       ? "Local device session"
@@ -92,9 +102,19 @@ export default async function DashboardOverview() {
             }
           />
           <DashboardMetricCard
-            label="Tracked assets"
-            value={String(workspace.assets.length)}
-            meta={stableAsset ? `Primary treasury asset: ${stableAsset.symbol}` : "Bootstrap treasury asset pending"}
+            label="Wallet balance"
+            value={
+              solAsset
+                ? `${formatFullAmount(solAsset.amountDisplay)} SOL`
+                : "0 SOL"
+            }
+            meta={
+              stableBalance
+                ? `${formatFullAmount(stableBalance.amountDisplay)} ${stableAsset!.symbol}`
+                : stableAsset
+                  ? `0 ${stableAsset.symbol}`
+                  : "Bootstrap treasury asset pending"
+            }
           />
           <DashboardMetricCard
             label="Agentic rails"
@@ -116,9 +136,11 @@ export default async function DashboardOverview() {
                 Review the managed treasury identity, stable asset posture, payout queue, and funding guidance before moving capital or issuing links.
               </p>
             </div>
-            <form action={bootstrapTreasuryFormAction}>
-              <button className={dashboardButtonClassName}>{stableAsset ? "Re-run bootstrap checks" : "Bootstrap treasury"}</button>
-            </form>
+            {!stableAsset && (
+              <form action={bootstrapTreasuryFormAction}>
+                <button className={dashboardButtonClassName}>Bootstrap treasury</button>
+              </form>
+            )}
           </div>
 
           <div className="mt-8 grid gap-4 md:grid-cols-2">
@@ -135,20 +157,24 @@ export default async function DashboardOverview() {
                   "unavailable"
                 )}
               </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <form action={requestAirdropFormAction}>
-                  <input type="hidden" name="amount" value="1" />
-                  <button className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition-all hover:bg-emerald-500/20 active:scale-95">
-                    + 1 SOL
-                  </button>
-                </form>
-                <form action={seedStablecoinFormAction}>
-                  <input type="hidden" name="amount" value="250" />
-                  <button className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-400 transition-all hover:bg-cyan-500/20 active:scale-95">
-                    + 250 {stableAsset?.symbol || "Stable"}
-                  </button>
-                </form>
-              </div>
+              {walletIsEmpty && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <form action={requestAirdropFormAction}>
+                    <input type="hidden" name="amount" value="1" />
+                    <button className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition-all hover:bg-emerald-500/20 active:scale-95">
+                      + 1 SOL
+                    </button>
+                  </form>
+                  {stableAsset && (
+                    <form action={seedStablecoinFormAction}>
+                      <input type="hidden" name="amount" value="250" />
+                      <button className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-400 transition-all hover:bg-cyan-500/20 active:scale-95">
+                        + 250 {stableAsset.symbol}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
             </div>
             <div className={cn(dashboardSubPanelClassName, "p-5")}>
               <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Payout queue</p>
@@ -197,33 +223,68 @@ export default async function DashboardOverview() {
         <DashboardPanel className="p-7 sm:p-8">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">Funding actions</p>
-              <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">Keep the operator wallet liquid</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
+                {walletIsEmpty ? "Funding actions" : "Wallet overview"}
+              </p>
+              <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+                {walletIsEmpty ? "Fund your operator wallet" : "Operator wallet balances"}
+              </h2>
               <p className="mt-3 text-sm leading-7 text-zinc-400">
-                Refresh balances, request devnet SOL for fees, or seed treasury stable liquidity into this passkey-controlled Solana wallet.
+                {walletIsEmpty
+                  ? "Request devnet SOL for fees, then seed treasury stable liquidity into your passkey-controlled Solana wallet."
+                  : "Live tracked balances across all token accounts in this workspace wallet."}
               </p>
             </div>
           </div>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-2">
-            <form action={requestAirdropFormAction} className={cn(dashboardSubPanelClassName, "p-5")}>
-              <input type="hidden" name="amount" value="1" />
-              <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Devnet SOL</p>
-              <p className="mt-4 text-sm leading-7 text-zinc-400">
-                Request 1 SOL to cover token-account creation, transaction fees, and claim settlement tests.
-              </p>
-              <button className={cn(dashboardButtonClassName, "mt-6 w-full")}>Request airdrop</button>
-            </form>
+          {walletIsEmpty ? (
+            <div className="mt-8 grid gap-4 md:grid-cols-2">
+              <form action={requestAirdropFormAction} className={cn(dashboardSubPanelClassName, "p-5")}>
+                <input type="hidden" name="amount" value="1" />
+                <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Devnet SOL</p>
+                <p className="mt-4 text-sm leading-7 text-zinc-400">
+                  Request 1 SOL to cover token-account creation, transaction fees, and claim settlement tests.
+                </p>
+                <button className={cn(dashboardButtonClassName, "mt-6 w-full")}>Request airdrop</button>
+              </form>
 
-            <form action={seedStablecoinFormAction} className={cn(dashboardSubPanelClassName, "p-5")}>
-              <input type="hidden" name="amount" value="250" />
-              <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Treasury stablecoin</p>
-              <p className="mt-4 text-sm leading-7 text-zinc-400">
-                Seed 250 {stableAsset?.symbol || "stable"} from the treasury so this workspace can test real Solana payment flows.
-              </p>
-              <button className={cn(dashboardButtonClassName, "mt-6 w-full")}>Seed wallet</button>
-            </form>
-          </div>
+              {stableAsset && (
+                <form action={seedStablecoinFormAction} className={cn(dashboardSubPanelClassName, "p-5")}>
+                  <input type="hidden" name="amount" value="250" />
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Treasury stablecoin</p>
+                  <p className="mt-4 text-sm leading-7 text-zinc-400">
+                    Seed 250 {stableAsset.symbol} from the treasury so this workspace can test real Solana payment flows.
+                  </p>
+                  <button className={cn(dashboardButtonClassName, "mt-6 w-full")}>Seed wallet</button>
+                </form>
+              )}
+            </div>
+          ) : (
+            <div className="mt-8 space-y-3">
+              {workspace.assets.map((asset) => (
+                <div key={asset.id} className={cn(dashboardSubPanelClassName, "flex items-center justify-between p-4")}>
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-xs font-bold text-zinc-300">
+                      {asset.symbol.slice(0, 3)}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-white">{asset.name || asset.symbol}</p>
+                      <p className="text-xs text-zinc-500">{asset.assetType === "native" ? "Native" : "SPL Token"}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-semibold tabular-nums text-white">
+                      {Number(asset.amountDisplay).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: asset.decimals > 4 ? 4 : asset.decimals,
+                      })}
+                    </p>
+                    <p className="text-xs text-zinc-500">{asset.symbol}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className={cn(dashboardSubPanelClassName, "mt-6 p-5")}>
             <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Latest funding event</p>
@@ -240,48 +301,21 @@ export default async function DashboardOverview() {
         </DashboardPanel>
 
         <DashboardPanel className="p-7 sm:p-8">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">Assets and activity</p>
-              <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">Live balances and recent settlement proof</h2>
-              <p className="mt-3 text-sm leading-7 text-zinc-400">
-                Asset snapshots are sourced from the connected Solana wallet and the treasury ledger, then paired with the latest payment or claim receipt.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {workspace.assets.length ? (
-              workspace.assets.map((asset) => (
-                <div key={asset.id} className={cn(dashboardSubPanelClassName, "p-5")}>
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{asset.assetType}</p>
-                  <p className="mt-4 text-3xl font-semibold tracking-tight text-white">{asset.symbol}</p>
-                  <p className="mt-2 text-lg font-medium text-zinc-100">{formatAmount(asset.amountDisplay)}</p>
-                  <p className="mt-2 text-sm text-zinc-400">{asset.name}</p>
-                </div>
-              ))
-            ) : (
-              <div className={cn(dashboardSubPanelClassName, "p-5 md:col-span-2 xl:col-span-3")}>
-                <p className="text-sm leading-7 text-zinc-400">No asset snapshots yet. Refresh balances after funding the workspace wallet.</p>
-              </div>
-            )}
-          </div>
-
-          <div className={cn(dashboardSubPanelClassName, "mt-6 p-5")}>
-            <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Latest receipt</p>
-            {latestReceipt ? (
-              <div className="mt-4 space-y-2 text-sm text-zinc-300">
-                <p>Receipt: {latestReceipt.receiptNumber}</p>
-                <p>Amount: {latestReceipt.amountDisplay} {latestReceipt.assetSymbol}</p>
-                <p>Rail: {latestReceipt.settlementRail}</p>
-                <p className="break-all">Signature: {latestReceipt.txSignature || "Unavailable"}</p>
-              </div>
-            ) : (
-              <p className="mt-4 text-sm leading-7 text-zinc-400">No receipts yet. Create a payment link or payout claim from Collections.</p>
-            )}
-          </div>
+          <LiveAssetsPanel initialAssets={workspace.assets} initialReceipt={latestReceipt} />
         </DashboardPanel>
       </section>
+
+      {/* SIX Group forex rates */}
+      <DashboardPanel className="p-7 sm:p-8">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">SIX Group market data</p>
+        <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">Live forex rates</h2>
+        <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-400">
+          Real-time FX rates from SIX Financial Information via mTLS-authenticated API. Refreshes every 60 seconds.
+        </p>
+        <div className="mt-6">
+          <ForexRatesWidget />
+        </div>
+      </DashboardPanel>
     </div>
   );
 }

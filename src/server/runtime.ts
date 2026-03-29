@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { CommerceService } from './services/CommerceService';
+import { SixMarketDataService } from './services/SixMarketDataService';
 import { SolanaService } from './services/SolanaService';
 import { TreasuryGuardService } from './services/TreasuryGuardService';
 import { WorkspaceService } from './services/WorkspaceService';
@@ -10,6 +11,7 @@ interface StablehacksRuntime {
   treasuryGuard: TreasuryGuardService;
   workspaceService: WorkspaceService;
   commerceService: CommerceService;
+  marketData: SixMarketDataService;
   store: DemoStore;
 }
 
@@ -25,12 +27,20 @@ export function getServerRuntime(): StablehacksRuntime {
     const treasuryGuard = new TreasuryGuardService(store, solana);
     const workspaceService = new WorkspaceService(solana, treasuryGuard);
     const commerceService = new CommerceService(solana, treasuryGuard);
+    const marketData = new SixMarketDataService({
+      certPath: process.env.SIX_API_CERT_PATH,
+      keyPath: process.env.SIX_API_KEY_PATH,
+      pfxPath: process.env.SIX_API_PFX_PATH,
+      passphrasePath: process.env.SIX_API_PFX_PASSWORD_PATH,
+      baseUrl: process.env.SIX_API_BASE_URL,
+    });
 
     globalThis.__stablehacksRuntime__ = {
       solana,
       treasuryGuard,
       workspaceService,
       commerceService,
+      marketData,
       store,
     };
   }

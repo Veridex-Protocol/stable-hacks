@@ -1,10 +1,12 @@
 import Link from "next/link";
 import {
+  bootstrapTreasuryFormAction,
   createClaimLinkFormAction,
   createInvoiceFormAction,
   createPaymentLinkFormAction,
 } from "@/app/actions";
-import { getWorkspaceStateOrNull } from "@/app/lib/server-data";
+import { getTreasuryState, getWorkspaceStateOrNull } from "@/app/lib/server-data";
+import { ErrorBanner } from "@/components/dashboard/ErrorBanner";
 import {
   DashboardEmptyState,
   DashboardPageHeader,
@@ -22,8 +24,16 @@ function formatAmount(value: string) {
   return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export default async function CollectionsPage() {
-  const workspace = await getWorkspaceStateOrNull();
+export default async function CollectionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string; bootstrapped?: string }>;
+}) {
+  const [workspace, treasury, params] = await Promise.all([
+    getWorkspaceStateOrNull(),
+    getTreasuryState(),
+    searchParams,
+  ]);
 
   if (!workspace) {
     return (
@@ -36,8 +46,77 @@ export default async function CollectionsPage() {
     );
   }
 
+  const stableAsset = treasury.summary.stableAsset;
+  const treasuryReady = Boolean(treasury.policy && stableAsset && treasury.actors.treasuryAddress);
+
   return (
     <div className="space-y-8">
+      {params.error ? <ErrorBanner message={params.error} /> : null}
+      {params.bootstrapped ? (
+        <ErrorBanner
+          tone="success"
+          message={`Treasury bootstrapped successfully. ${stableAsset ? `${stableAsset.symbol} settlement rails are now live on Solana devnet.` : "Refresh the page if the asset details are still loading."}`}
+        />
+      ) : null}
+      <DashboardPanel className="p-7 sm:p-8">
+        <DashboardPageHeader
+          eyebrow="Collections readiness"
+          title={treasuryReady ? "Treasury is ready for payment and claim links" : "Treasury bootstrap will run on first commerce action"}
+          description={
+            treasuryReady
+              ? `Claims, payment links, and invoices will settle against ${stableAsset!.symbol} on Solana devnet from treasury vault ${workspace.treasury.vaultAddress}.`
+              : "The first payment link, payout claim, or invoice you create will initialize the Solana treasury vault and managed stable asset automatically. You can also bootstrap it manually first."
+          }
+          actions={
+            !treasuryReady ? (
+              <form action={bootstrapTreasuryFormAction}>
+                <input type="hidden" name="returnTo" value="/dashboard/collections" />
+                <button className={dashboardButtonClassName}>Bootstrap treasury now</button>
+              </form>
+            ) : undefined
+          }
+        />
+
+        <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <div className={cn(dashboardSubPanelClassName, "p-5")}>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Settlement asset</p>
+            <div className="mt-4 flex items-center gap-3">
+              <DashboardStatusBadge tone={treasuryReady ? "success" : "warning"}>
+                {treasuryReady ? stableAsset!.symbol : "Pending bootstrap"}
+              </DashboardStatusBadge>
+            </div>
+            <p className="mt-4 break-all text-sm leading-6 text-zinc-400">
+              {treasuryReady ? stableAsset!.mintAddress : "A managed Solana devnet stable asset will be created on first commerce action."}
+            </p>
+          </div>
+
+          <div className={cn(dashboardSubPanelClassName, "p-5")}>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Treasury vault</p>
+            <p className="mt-4 break-all text-sm leading-6 text-zinc-100">
+              {treasury.actors.treasuryAddress || "Will be generated during treasury bootstrap"}
+            </p>
+            <p className="mt-3 text-sm leading-6 text-zinc-400">
+              {treasury.summary.explorerAddressUrl && treasury.actors.treasuryAddress ? (
+                <a href={treasury.summary.explorerAddressUrl} target="_blank" rel="noreferrer" className="text-emerald-400 hover:underline">
+                  Open Solana explorer
+                </a>
+              ) : (
+                "Explorer link becomes available after bootstrap."
+              )}
+            </p>
+          </div>
+
+          <div className={cn(dashboardSubPanelClassName, "p-5")}>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">First-run behavior</p>
+            <p className="mt-4 text-sm leading-7 text-zinc-400">
+              {treasuryReady
+                ? "Commerce flows are already live. New payment links, payout claims, and invoices will use the bootstrapped treasury immediately."
+                : "Creating your first commerce object will bootstrap the treasury, mint the managed stable asset, and then continue the request."}
+            </p>
+          </div>
+        </div>
+      </DashboardPanel>
+
       <DashboardPanel className="p-7 sm:p-8">
         <DashboardPageHeader
           eyebrow="Collections and commerce"
@@ -68,7 +147,10 @@ export default async function CollectionsPage() {
 
           <form action={createClaimLinkFormAction} className={cn(dashboardSubPanelClassName, "p-5")}>
             <h2 className="text-lg font-semibold text-white">Payout claim link</h2>
-            <p className="mt-2 text-sm leading-6 text-zinc-400">Issue a claimable payout that can be settled by a human or an agent, based on the selected mode.</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">
+              Issue a claimable payout that can be settled by a human or an agent, based on the selected mode.
+              {!treasuryReady ? " If this is your first claim link, the treasury will bootstrap automatically before the link is created." : ""}
+            </p>
             <div className="mt-5 space-y-4">
               <input name="title" required className={dashboardInputClassName} placeholder="Vendor reimbursement" />
               <input name="amount" required type="number" min="0.01" step="0.01" className={dashboardInputClassName} placeholder="250.00" />
@@ -106,6 +188,9 @@ export default async function CollectionsPage() {
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">Live commerce links</p>
               <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">Payment requests and payout claims</h2>
             </div>
+            <Link href="/dashboard/collections/links" className={cn(dashboardButtonClassName, "whitespace-nowrap")}>
+              Manage links →
+            </Link>
           </div>
 
           <div className="mt-8 overflow-hidden rounded-3xl border border-zinc-800">

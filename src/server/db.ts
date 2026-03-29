@@ -1,6 +1,11 @@
+import { config as loadEnv } from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
+
+loadEnv({ path: '.env.local', quiet: true });
+loadEnv({ path: '.env', quiet: true });
+loadEnv({ quiet: true });
 
 declare global {
   // eslint-disable-next-line no-var
@@ -14,11 +19,33 @@ function getPool(): Pool {
     return globalThis.__pgPool;
   }
 
+  const connectionString = process.env.DATABASE_URL ?? process.env.FRONTIER_DATABASE_URL;
+
+  if (!connectionString) {
+    throw new Error('DATABASE_URL or FRONTIER_DATABASE_URL environment variable is not set');
+  }
+
+  const lower = connectionString.toLowerCase();
+  const useSsl = !(
+    lower.includes('localhost') ||
+    lower.includes('127.0.0.1') ||
+    lower.includes('postgresql://localhost') ||
+    lower.includes('postgres://localhost')
+  );
+
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
+    connectionString,
+    max: 5,
+    idleTimeoutMillis: 20_000,
+    connectionTimeoutMillis: 10_000,
+    statement_timeout: 10_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+    ssl: useSsl ? { rejectUnauthorized: false } : undefined,
+  });
+
+  pool.on('error', (err) => {
+    console.error('[pg Pool] Idle client error:', err.message);
   });
 
   if (process.env.NODE_ENV !== 'production') {

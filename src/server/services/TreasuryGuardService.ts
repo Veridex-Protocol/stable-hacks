@@ -25,6 +25,8 @@ import { SolanaService } from './SolanaService';
 
 const require = createRequire(import.meta.url);
 const { ComplianceExporter } = require('@veridex/agentic-payments') as typeof import('@veridex/agentic-payments');
+const SOLANA_DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const SOLANA_DEVNET_USDC_DECIMALS = 6;
 
 function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
@@ -73,18 +75,42 @@ export class TreasuryGuardService {
     const approver = this.solana.generateKeypair();
     const auditor = this.solana.generateKeypair();
 
-    await this.solana.requestAirdrop(treasury.publicKey, 2);
+    let fundingReady = false;
+    let fundingWarning: string | null = null;
 
-    const stableAsset =
-      request.assetMode === 'external-mint' && request.externalMintAddress
-        ? await this.solana.validateMint(request.externalMintAddress)
-        : await this.solana.createManagedStableMint(
-            treasury,
-            'USDX',
-            ensureNumber(request.initialMintAmount, 250_000),
-          );
+    try {
+      await this.solana.requestAirdrop(treasury.publicKey, 1);
+      fundingReady = true;
+    } catch (error) {
+      fundingWarning =
+        error instanceof Error
+          ? error.message
+          : 'Treasury airdrop did not complete on Solana devnet.';
+    }
 
-    await this.solana.ensureTokenAccount(treasury, treasury.publicKey, stableAsset.mintAddress);
+    let stableAsset: StableAssetConfig;
+
+    if (request.assetMode === 'external-mint' && request.externalMintAddress) {
+      stableAsset = await this.solana.validateMint(request.externalMintAddress);
+    } else if (fundingReady) {
+      stableAsset = await this.solana.createManagedStableMint(
+        treasury,
+        'USDX',
+        ensureNumber(request.initialMintAmount, 250_000),
+      );
+    } else {
+      stableAsset = {
+        decimals: SOLANA_DEVNET_USDC_DECIMALS,
+        mintAddress: SOLANA_DEVNET_USDC_MINT,
+        mode: 'external-mint',
+        supply: undefined,
+        symbol: 'USDC',
+      };
+    }
+
+    if (fundingReady) {
+      await this.solana.ensureTokenAccount(treasury, treasury.publicKey, stableAsset.mintAddress);
+    }
 
     const policy: TreasuryPolicy = {
       id: createId('policy'),
@@ -122,6 +148,9 @@ export class TreasuryGuardService {
           stableAsset.mode === 'managed-mint'
             ? 'Created a managed SPL stable asset for the self-contained demo.'
             : 'Configured an external Solana stablecoin mint.',
+          fundingWarning
+            ? `Treasury faucet was rate-limited, so bootstrap used the external Solana devnet USDC mint. Fund the treasury wallet manually before claim settlement: ${fundingWarning}`
+            : 'Treasury vault received devnet SOL and is ready for managed mint and claim settlement flows.',
         ],
       },
     };
@@ -629,12 +658,20 @@ export class TreasuryGuardService {
 
   private async buildSummary(state: DemoState): Promise<TreasurySummary> {
     const treasuryAddress = state.actors.treasury?.publicKey;
-    const [lamports, stableBalance] = treasuryAddress && state.stableAsset
-      ? await Promise.all([
+    let lamports = 0n;
+    let stableBalance = 0n;
+
+    if (treasuryAddress && state.stableAsset) {
+      try {
+        [lamports, stableBalance] = await Promise.all([
           this.solana.getSolBalance(treasuryAddress),
           this.solana.getTokenBalance(treasuryAddress, state.stableAsset.mintAddress),
-        ])
-      : [0n, 0n];
+        ]);
+      } catch {
+        lamports = 0n;
+        stableBalance = 0n;
+      }
+    }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);

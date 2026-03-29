@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   FileStack,
   LayoutDashboard,
+  Link2,
   Logs,
   Menu,
   Settings,
@@ -31,6 +32,12 @@ const NAV_ITEMS = [
     label: "Collections",
     description: "Links, invoices, and receipts",
     icon: FileStack,
+  },
+  {
+    href: "/dashboard/collections/links",
+    label: "Manage Links",
+    description: "View, filter, and disable payment links",
+    icon: Link2,
   },
   {
     href: "/dashboard/reviews",

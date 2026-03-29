@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { DemoStore } from './store/DemoStore';
 import { SolanaService } from './services/SolanaService';
 import { CommerceService } from './services/CommerceService';
+import { SixMarketDataService } from './services/SixMarketDataService';
 import { TreasuryGuardService } from './services/TreasuryGuardService';
 import { WorkspaceService } from './services/WorkspaceService';
 import type {
@@ -37,6 +38,11 @@ const store = new DemoStore(dataFile, solana.getRpcUrl(), solana.getExplorerBase
 const treasuryGuard = new TreasuryGuardService(store, solana);
 const workspaceService = new WorkspaceService(solana, treasuryGuard);
 const commerceService = new CommerceService(solana, treasuryGuard);
+const marketData = new SixMarketDataService({
+  certPath: process.env.SIX_API_CERT_PATH,
+  keyPath: process.env.SIX_API_KEY_PATH,
+  baseUrl: process.env.SIX_API_BASE_URL,
+});
 
 const app = express();
 app.use(cors());
@@ -206,6 +212,52 @@ app.get('/api/export', route(async (req, res) => {
   res.setHeader('content-type', format === 'csv' ? 'text/csv; charset=utf-8' : 'application/json');
   res.setHeader('content-disposition', `attachment; filename="${payload.filename}"`);
   res.status(200).send(payload.content);
+}));
+
+// ── Market Data (SIX Group) ──────────────────────────────────────────────────
+
+app.get('/api/market-data/forex', route(async (_req, res) => {
+  if (!marketData.isAvailable()) {
+    sendResponse(res, failure('SIX Market Data not configured — mTLS certificates missing.'), 503);
+    return;
+  }
+  sendResponse(res, success(await marketData.getAllForexRates()));
+}));
+
+app.get('/api/market-data/forex/:pair', route(async (req, res) => {
+  if (!marketData.isAvailable()) {
+    sendResponse(res, failure('SIX Market Data not configured — mTLS certificates missing.'), 503);
+    return;
+  }
+  const pair = req.params.pair.replace('-', '/').toUpperCase();
+  sendResponse(res, success(await marketData.getForexRate(pair)));
+}));
+
+app.get('/api/market-data/snapshot/:valorBc', route(async (req, res) => {
+  if (!marketData.isAvailable()) {
+    sendResponse(res, failure('SIX Market Data not configured — mTLS certificates missing.'), 503);
+    return;
+  }
+  sendResponse(res, success(await marketData.getIntradaySnapshot(req.params.valorBc)));
+}));
+
+app.get('/api/market-data/search', route(async (req, res) => {
+  if (!marketData.isAvailable()) {
+    sendResponse(res, failure('SIX Market Data not configured — mTLS certificates missing.'), 503);
+    return;
+  }
+  const text = typeof req.query.q === 'string' ? req.query.q : '';
+  if (!text) { sendResponse(res, failure('Missing query parameter ?q='), 400); return; }
+  const size = Number(req.query.size) || 5;
+  sendResponse(res, success(await marketData.searchInstruments(text, size)));
+}));
+
+// ── Payment Link Disable ─────────────────────────────────────────────────────
+
+app.post('/api/workspace/:profileId/payment-links/:linkId/disable', route(async (req, res) => {
+  const body = (req.body || {}) as { sessionId?: string };
+  await commerceService.disablePaymentLink(req.params.profileId, req.params.linkId);
+  sendResponse(res, success(await workspaceService.getWorkspaceState(req.params.profileId, body.sessionId)));
 }));
 
 app.get('/api/health', route(async (_req, res) => {
