@@ -1,0 +1,244 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AuthSessionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  INVALID
+}
+
+enum AssetType {
+  NATIVE
+  SPL
+}
+
+enum FundingEventType {
+  AIRDROP
+  TREASURY_SEED
+  MANUAL
+}
+
+enum FundingEventStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+enum PaymentLinkKind {
+  PAYMENT_REQUEST
+  PAYOUT_CLAIM
+}
+
+enum PaymentLinkStatus {
+  ACTIVE
+  PAID
+  CLAIMED
+  EXPIRED
+}
+
+enum ClaimMode {
+  HUMAN
+  AGENT
+  EITHER
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  VOID
+}
+
+enum ReceiptKind {
+  PAYMENT
+  PAYOUT_CLAIM
+}
+
+enum SettlementRail {
+  MANUAL_TX
+  SOLANA_X402
+  HUMAN_CLAIM
+  AGENT_CLAIM
+}
+
+model TreasuryProfile {
+  id                  String         @id @default(cuid())
+  username            String
+  displayName         String
+  keyHash             String         @unique
+  credentialId        String         @unique
+  publicKeyX          String
+  publicKeyY          String
+  walletAddress       String         @unique
+  walletExplorerUrl   String
+  authOrigin          String?
+  lastAuthenticatedAt DateTime?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  authSessions        AuthSession[]
+  assetSnapshots      AssetSnapshot[]
+  fundingEvents       FundingEvent[]
+  paymentLinks        PaymentLink[]
+  invoices            Invoice[]
+  receipts            Receipt[]
+
+  @@index([walletAddress])
+  @@index([updatedAt])
+}
+
+model AuthSession {
+  id              String            @id @default(cuid())
+  profileId       String
+  profile         TreasuryProfile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  serverSessionId String            @unique
+  keyHash         String
+  appOrigin       String
+  permissions     Json
+  expiresAt       DateTime
+  relayerIssuedAt DateTime
+  lastValidatedAt DateTime?
+  status          AuthSessionStatus @default(ACTIVE)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([profileId, createdAt])
+  @@index([profileId, status])
+  @@index([expiresAt])
+}
+
+model AssetSnapshot {
+  id              String          @id @default(cuid())
+  captureId       String
+  profileId       String
+  profile         TreasuryProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  walletAddress   String
+  assetType       AssetType
+  symbol          String
+  name            String?
+  mintAddress     String?
+  tokenAccount    String?
+  amountRaw       String
+  amountDisplay   String
+  decimals        Int
+  explorerUrl     String?
+  capturedAt      DateTime        @default(now())
+
+  @@index([profileId, capturedAt])
+  @@index([profileId, captureId])
+  @@index([walletAddress, capturedAt])
+}
+
+model FundingEvent {
+  id                 String             @id @default(cuid())
+  profileId          String
+  profile            TreasuryProfile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  eventType          FundingEventType
+  status             FundingEventStatus @default(PENDING)
+  assetSymbol        String
+  mintAddress        String?
+  amountRaw          String?
+  amountDisplay      String
+  sourceAddress      String?
+  destinationAddress String
+  signature          String?
+  explorerUrl        String?
+  notes              String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([profileId, createdAt])
+  @@index([signature])
+  @@index([eventType, status])
+}
+
+model PaymentLink {
+  id                   String            @id @default(cuid())
+  profileId            String
+  profile              TreasuryProfile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  kind                 PaymentLinkKind
+  slug                 String            @unique
+  title                String
+  description          String?
+  assetSymbol          String
+  mintAddress          String?
+  amountRaw            String
+  amountDisplay        String
+  destinationAddress   String
+  status               PaymentLinkStatus @default(ACTIVE)
+  claimMode            ClaimMode         @default(EITHER)
+  x402Enabled          Boolean           @default(false)
+  invoiceId            String?           @unique
+  invoice              Invoice?          @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  settledSignature     String?
+  explorerUrl          String?
+  payerAddress         String?
+  claimantAddress      String?
+  customerName         String?
+  customerEmail        String?
+  expiresAt            DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  receipts             Receipt[]
+
+  @@index([profileId, createdAt])
+  @@index([profileId, status])
+  @@index([slug, status])
+}
+
+model Invoice {
+  id            String         @id @default(cuid())
+  profileId     String
+  profile       TreasuryProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  invoiceNumber String         @unique
+  title         String
+  description   String?
+  customerName  String
+  customerEmail String?
+  amountRaw     String
+  amountDisplay String
+  assetSymbol   String
+  mintAddress   String?
+  dueDate       DateTime?
+  status        InvoiceStatus  @default(DRAFT)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  paymentLink   PaymentLink?
+  receipts      Receipt[]
+
+  @@index([profileId, createdAt])
+  @@index([profileId, status])
+}
+
+model Receipt {
+  id               String         @id @default(cuid())
+  profileId        String
+  profile          TreasuryProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  receiptNumber    String         @unique
+  kind             ReceiptKind
+  settlementRail   SettlementRail @default(MANUAL_TX)
+  invoiceId        String?
+  invoice          Invoice?       @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  paymentLinkId    String?
+  paymentLink      PaymentLink?   @relation(fields: [paymentLinkId], references: [id], onDelete: SetNull)
+  txSignature      String?        @unique
+  explorerUrl      String?
+  payerAddress     String?
+  recipientAddress String
+  assetSymbol      String
+  mintAddress      String?
+  amountRaw        String
+  amountDisplay    String
+  note             String?
+  proofPayload     Json?
+  createdAt        DateTime       @default(now())
+
+  @@index([profileId, createdAt])
+  @@index([paymentLinkId])
+  @@index([invoiceId])
+}
