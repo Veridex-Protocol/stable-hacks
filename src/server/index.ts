@@ -39,8 +39,14 @@ const treasuryGuard = new TreasuryGuardService(store, solana);
 const workspaceService = new WorkspaceService(solana, treasuryGuard);
 const commerceService = new CommerceService(solana, treasuryGuard);
 const marketData = new SixMarketDataService({
+  cert: process.env.SIX_API_CERT,
+  key: process.env.SIX_API_KEY,
+  pfx: process.env.SIX_API_PFX,
+  passphrase: process.env.SIX_API_PFX_PASSWORD,
   certPath: process.env.SIX_API_CERT_PATH,
   keyPath: process.env.SIX_API_KEY_PATH,
+  pfxPath: process.env.SIX_API_PFX_PATH,
+  passphrasePath: process.env.SIX_API_PFX_PASSWORD_PATH,
   baseUrl: process.env.SIX_API_BASE_URL,
 });
 

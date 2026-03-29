@@ -54,6 +54,10 @@ export class SixMarketDataService {
   private readonly available: boolean;
 
   constructor(options?: {
+    cert?: string;
+    key?: string;
+    pfx?: string;
+    passphrase?: string;
     certPath?: string;
     keyPath?: string;
     pfxPath?: string;
@@ -62,12 +66,44 @@ export class SixMarketDataService {
   }) {
     this.baseUrl = options?.baseUrl ?? process.env.SIX_API_BASE_URL ?? 'https://api.six-group.com/web/v2';
 
+    // Raw values take priority (for Vercel / serverless), file paths as fallback (local dev)
+    const rawCert = options?.cert ?? process.env.SIX_API_CERT;
+    const rawKey = options?.key ?? process.env.SIX_API_KEY;
+    const rawPfx = options?.pfx ?? process.env.SIX_API_PFX; // base64-encoded
+    const rawPassphrase = options?.passphrase ?? process.env.SIX_API_PFX_PASSWORD;
+
     const certPath = options?.certPath ?? process.env.SIX_API_CERT_PATH;
     const keyPath = options?.keyPath ?? process.env.SIX_API_KEY_PATH;
     const pfxPath = options?.pfxPath ?? process.env.SIX_API_PFX_PATH;
     const passphrasePath = options?.passphrasePath ?? process.env.SIX_API_PFX_PASSWORD_PATH;
 
     try {
+      // 1) Raw PFX (base64-encoded string)
+      if (rawPfx) {
+        const pfx = Buffer.from(rawPfx, 'base64');
+        this.agent = new https.Agent({
+          pfx,
+          passphrase: rawPassphrase,
+          rejectUnauthorized: true,
+          keepAlive: true,
+        });
+        this.available = true;
+        return;
+      }
+
+      // 2) Raw PEM cert + key (string content)
+      if (rawCert && rawKey) {
+        this.agent = new https.Agent({
+          cert: rawCert,
+          key: rawKey,
+          rejectUnauthorized: true,
+          keepAlive: true,
+        });
+        this.available = true;
+        return;
+      }
+
+      // 3) PFX file path
       if (pfxPath) {
         const resolvedPfx = path.isAbsolute(pfxPath) ? pfxPath : path.resolve(process.cwd(), pfxPath);
         const pfx = fs.readFileSync(resolvedPfx);
@@ -76,7 +112,7 @@ export class SixMarketDataService {
               path.isAbsolute(passphrasePath) ? passphrasePath : path.resolve(process.cwd(), passphrasePath),
               'utf8',
             ).trim()
-          : undefined;
+          : rawPassphrase;
 
         this.agent = new https.Agent({
           pfx,
@@ -88,6 +124,7 @@ export class SixMarketDataService {
         return;
       }
 
+      // 4) PEM file paths
       if (certPath && keyPath) {
         const resolvedCert = path.isAbsolute(certPath) ? certPath : path.resolve(process.cwd(), certPath);
         const resolvedKey = path.isAbsolute(keyPath) ? keyPath : path.resolve(process.cwd(), keyPath);
